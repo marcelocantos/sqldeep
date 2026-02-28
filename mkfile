@@ -1,4 +1,5 @@
 # ── Toolchain ────────────────────────────────────────────────────────
+cc  = cc
 cxx = c++ -std=c++20
 cxxflags = -Wall -Wextra -Wpedantic
 
@@ -20,7 +21,8 @@ test_objs = $[patsubst %.cpp,build/%.o,$test_srcs]
     rm -rf build/ .mk/
 
 # ── Binaries ─────────────────────────────────────────────────────────
-build/sqldeep_tests: $test_objs build/sqldeep.o
+# Tests link sqlite3 for integration tests; the library itself does not.
+build/sqldeep_tests: $test_objs build/sqldeep.o build/sqlite3.o
     $cxx $cxxflags -o $target $inputs
 
 build/demo: build/examples/demo.o build/sqldeep.o
@@ -29,6 +31,9 @@ build/demo: build/examples/demo.o build/sqldeep.o
 # ── Compilation rules ────────────────────────────────────────────────
 build/sqldeep.o: sqldeep.cpp
     $cxx $cxxflags $incflags -c $input -o $target
+
+build/sqlite3.o: $vendor/src/sqlite3.c
+    $cc -w -c $input -o $target
 
 build/tests/{name}.o: tests/{name}.cpp
     $cxx $cxxflags $incflags -c $input -o $target
