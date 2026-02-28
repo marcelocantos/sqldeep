@@ -268,6 +268,32 @@ TEST_CASE("sqlite: WHERE clause preserved") {
     CHECK(rows[1] == R"({"id":3,"name":"carol"})");
 }
 
+// ── Key escaping ───────────────────────────────────────────────────
+
+TEST_CASE("sqlite: single-quote in key") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'x')");
+
+    auto rows = transpile_and_query(g.db,
+        "SELECT { \"it's\": val } FROM t");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"it's":"x"})");
+}
+
+TEST_CASE("sqlite: SQL doubled-quote string") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY)");
+    exec(g.db, "INSERT INTO t VALUES(1)");
+
+    auto rows = transpile_and_query(g.db,
+        "SELECT { name: 'O''Brien' } FROM t");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"name":"O'Brien"})");
+}
+
 // ── SQL passthrough ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: plain SQL passthrough") {

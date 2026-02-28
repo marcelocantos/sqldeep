@@ -226,3 +226,46 @@ TEST_CASE("error has position info") {
 TEST_CASE("missing value after colon") {
     CHECK_THROWS_AS(transpile("SELECT { key: } FROM t"), Error);
 }
+
+// ── Key escaping ───────────────────────────────────────────────────
+
+TEST_CASE("single-quote in double-quoted key is escaped") {
+    CHECK(transpile("SELECT { \"it's\": v } FROM t") ==
+          "SELECT json_object('it''s', v) FROM t");
+}
+
+TEST_CASE("backslash-escaped quote in double-quoted key") {
+    CHECK(transpile("SELECT { \"say \\\"hello\\\"\": v } FROM t") ==
+          "SELECT json_object('say \"hello\"', v) FROM t");
+}
+
+// ── SQL doubled-quote strings ──────────────────────────────────────
+
+TEST_CASE("SQL doubled single-quote passthrough") {
+    CHECK(transpile("SELECT { name: 'O''Brien' } FROM t") ==
+          "SELECT json_object('name', 'O''Brien') FROM t");
+}
+
+TEST_CASE("SQL doubled double-quote in key") {
+    CHECK(transpile("SELECT { \"say \"\"hi\"\"\": v } FROM t") ==
+          "SELECT json_object('say \"hi\"', v) FROM t");
+}
+
+// ── Nesting depth ──────────────────────────────────────────────────
+
+TEST_CASE("excessive nesting depth throws") {
+    // Build deeply nested input: SELECT { a: SELECT { a: ... } FROM t } FROM t
+    std::string input;
+    for (int i = 0; i < 250; ++i)
+        input += "SELECT { a: ";
+    input += "1";
+    for (int i = 0; i < 250; ++i)
+        input += " } FROM t";
+    CHECK_THROWS_AS(transpile(input), Error);
+}
+
+// ── Unmatched paren ────────────────────────────────────────────────
+
+TEST_CASE("unmatched closing paren throws") {
+    CHECK_THROWS_AS(transpile("SELECT { id } FROM t )"), Error);
+}

@@ -17,6 +17,8 @@ system (`mkfile`).
 ## Dependencies
 
 - **doctest** — vendored in `vendor/include/doctest.h` (test only)
+- **SQLite 3** — vendored in `vendor/include/sqlite3.h` + `vendor/src/sqlite3.c`
+  (integration tests only; the library itself has no SQLite dependency)
 
 ## Architecture
 
@@ -71,7 +73,13 @@ mkfile              Build system (mk)
 
 - `test_transpile.cpp` — end-to-end transpilation: basic objects, renamed
   fields, trailing commas, inline arrays, nested subqueries (2- and 3-level),
-  mixed array/object nesting, comments, SQL passthrough, error cases
+  mixed array/object nesting, comments, SQL passthrough, key escaping, nesting
+  depth limits, error cases
+
+- `test_sqlite.cpp` — integration tests: transpile sqldeep syntax, execute the
+  resulting SQL against an in-memory SQLite database, and verify the JSON output.
+  Covers single-table queries, two- and three-level nesting, mixed array/object
+  nesting, empty subquery results, WHERE clauses, and plain SQL passthrough.
 
 Add new tests to `test_transpile.cpp` or create new `test_*.cpp` files for
 focused component testing.

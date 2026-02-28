@@ -11,6 +11,8 @@
 namespace sqldeep {
 namespace {
 
+static constexpr int kMaxNestingDepth = 200;
+
 // ── Lexer ───────────────────────────────────────────────────────────
 
 enum class TokenType {
@@ -145,7 +147,16 @@ private:
     Token lex_string(char quote, TokenType type, int tline, int tcol, size_t begin) {
         std::string s(1, quote);
         advance(); // skip opening quote
-        while (pos_ < src_.size() && src_[pos_] != quote) {
+        while (pos_ < src_.size()) {
+            if (src_[pos_] == quote) {
+                // SQL doubled-quote escape: '' inside '...' or "" inside "..."
+                if (pos_ + 1 < src_.size() && src_[pos_ + 1] == quote) {
+                    s += quote; advance();
+                    s += quote; advance();
+                    continue;
+                }
+                break; // end of string
+            }
             if (src_[pos_] == '\\' && pos_ + 1 < src_.size()) {
                 s += src_[pos_]; advance();
                 s += src_[pos_]; advance();
@@ -254,15 +265,22 @@ public:
         return parse_sql_parts(/*stop_comma=*/false,
                                /*stop_rbrace=*/false,
                                /*stop_rbracket=*/false,
-                               /*stop_rparen=*/false);
+                               /*stop_rparen=*/false,
+                               /*depth=*/0);
     }
 
 private:
+    void check_depth(int depth, int line, int col) {
+        if (depth > kMaxNestingDepth)
+            lex_.error("maximum nesting depth exceeded", line, col);
+    }
+
     // Parse a sequence of SQL fragments interleaved with deep constructs.
     SqlParts parse_sql_parts(bool stop_comma,
                              bool stop_rbrace,
                              bool stop_rbracket,
-                             bool stop_rparen) {
+                             bool stop_rparen,
+                             int depth) {
         SqlParts parts;
         std::string accum;
         size_t last_end = 0; // src position after last consumed raw token
@@ -332,7 +350,8 @@ private:
                         flush_before(t);
                         auto ds = parse_deep_select(t2,
                             /*stop_comma=*/false, /*stop_rbrace=*/false,
-                            /*stop_rbracket=*/false, /*stop_rparen=*/true);
+                            /*stop_rbracket=*/false, /*stop_rparen=*/true,
+                            depth + 1);
                         Token rp = lex_.next(); // consume )
                         if (rp.type != TokenType::RParen)
                             lex_.error("expected ')' after subquery", rp.line, rp.col);
@@ -355,7 +374,8 @@ private:
                     Token sel = {TokenType::Ident, "SELECT", t.line, t.col,
                                  t.src_begin, t.src_end};
                     auto ds = parse_deep_select(sel, stop_comma, stop_rbrace,
-                                                stop_rbracket, stop_rparen);
+                                                stop_rbracket, stop_rparen,
+                                                depth + 1);
                     parts.push_back(std::move(ds));
                     last_end = lex_.offset();
                     continue;
@@ -367,7 +387,7 @@ private:
             // Check for inline { or [ at depth 0
             if (paren_depth == 0 && t.type == TokenType::LBrace) {
                 flush_before(t);
-                auto obj = parse_object_literal();
+                auto obj = parse_object_literal(depth + 1);
                 parts.push_back(std::move(obj));
                 last_end = lex_.offset();
                 continue;
@@ -375,7 +395,7 @@ private:
 
             if (paren_depth == 0 && t.type == TokenType::LBracket) {
                 flush_before(t);
-                auto arr = parse_array_literal();
+                auto arr = parse_array_literal(depth + 1);
                 parts.push_back(std::move(arr));
                 last_end = lex_.offset();
                 continue;
@@ -383,7 +403,11 @@ private:
 
             // Track paren depth
             if (t.type == TokenType::LParen) ++paren_depth;
-            if (t.type == TokenType::RParen) --paren_depth;
+            if (t.type == TokenType::RParen) {
+                if (paren_depth == 0)
+                    lex_.error("unmatched ')'", t.line, t.col);
+                --paren_depth;
+            }
 
             // Accumulate raw SQL token
             Token tok = lex_.next();
@@ -398,27 +422,30 @@ private:
     std::unique_ptr<DeepSelect> parse_deep_select(
             const Token& select_tok,
             bool stop_comma, bool stop_rbrace,
-            bool stop_rbracket, bool stop_rparen) {
+            bool stop_rbracket, bool stop_rparen,
+            int depth) {
+        check_depth(depth, select_tok.line, select_tok.col);
         auto ds = std::make_unique<DeepSelect>();
 
         Token t = lex_.peek();
         if (t.type == TokenType::LBrace) {
-            ds->projection = std::move(*parse_object_literal());
+            ds->projection = std::move(*parse_object_literal(depth));
         } else if (t.type == TokenType::LBracket) {
-            ds->projection = std::move(*parse_array_literal());
+            ds->projection = std::move(*parse_array_literal(depth));
         } else {
             lex_.error("expected '{' or '[' after SELECT",
                        select_tok.line, select_tok.col);
         }
 
         ds->tail = parse_sql_parts(stop_comma, stop_rbrace,
-                                   stop_rbracket, stop_rparen);
+                                   stop_rbracket, stop_rparen, depth);
         return ds;
     }
 
-    std::unique_ptr<ObjectLiteral> parse_object_literal() {
+    std::unique_ptr<ObjectLiteral> parse_object_literal(int depth) {
         Token lbrace = lex_.next();
         assert(lbrace.type == TokenType::LBrace);
+        check_depth(depth, lbrace.line, lbrace.col);
 
         auto obj = std::make_unique<ObjectLiteral>();
 
@@ -428,7 +455,7 @@ private:
             if (t.type == TokenType::Eof)
                 lex_.error("unterminated '{'", lbrace.line, lbrace.col);
 
-            obj->fields.push_back(parse_field());
+            obj->fields.push_back(parse_field(depth));
 
             t = lex_.peek();
             if (t.type == TokenType::Comma) {
@@ -441,14 +468,27 @@ private:
         return obj;
     }
 
-    ObjectLiteral::Field parse_field() {
+    ObjectLiteral::Field parse_field(int depth) {
         ObjectLiteral::Field field;
 
         Token key = lex_.next();
         if (key.type == TokenType::Ident) {
             field.key = key.text;
         } else if (key.type == TokenType::DqString) {
-            field.key = key.text.substr(1, key.text.size() - 2);
+            // Strip outer quotes and unescape \" → " and \\ → \.
+            auto raw = key.text.substr(1, key.text.size() - 2);
+            field.key.reserve(raw.size());
+            for (size_t i = 0; i < raw.size(); ++i) {
+                if (raw[i] == '\\' && i + 1 < raw.size() &&
+                    (raw[i + 1] == '"' || raw[i + 1] == '\\')) {
+                    field.key += raw[++i];
+                } else if (raw[i] == '"' && i + 1 < raw.size() && raw[i + 1] == '"') {
+                    field.key += '"';
+                    ++i; // skip doubled quote
+                } else {
+                    field.key += raw[i];
+                }
+            }
         } else {
             lex_.error("expected field name (identifier or double-quoted string)",
                        key.line, key.col);
@@ -460,7 +500,8 @@ private:
             field.value = parse_sql_parts(/*stop_comma=*/true,
                                           /*stop_rbrace=*/true,
                                           /*stop_rbracket=*/false,
-                                          /*stop_rparen=*/false);
+                                          /*stop_rparen=*/false,
+                                          depth);
             if (field.value.empty())
                 lex_.error("expected expression after ':'", t.line, t.col);
         }
@@ -468,9 +509,10 @@ private:
         return field;
     }
 
-    std::unique_ptr<ArrayLiteral> parse_array_literal() {
+    std::unique_ptr<ArrayLiteral> parse_array_literal(int depth) {
         Token lbracket = lex_.next();
         assert(lbracket.type == TokenType::LBracket);
+        check_depth(depth, lbracket.line, lbracket.col);
 
         auto arr = std::make_unique<ArrayLiteral>();
 
@@ -483,7 +525,8 @@ private:
             auto elem = parse_sql_parts(/*stop_comma=*/true,
                                         /*stop_rbrace=*/false,
                                         /*stop_rbracket=*/true,
-                                        /*stop_rparen=*/false);
+                                        /*stop_rparen=*/false,
+                                        depth);
             if (elem.empty())
                 lex_.error("expected expression in array literal");
             arr->elements.push_back(std::move(elem));
@@ -503,6 +546,17 @@ private:
 };
 
 // ── Renderer ────────────────────────────────────────────────────────
+
+// Escape single-quote characters for use inside a SQL string literal.
+static std::string sql_escape_key(const std::string& s) {
+    std::string r;
+    r.reserve(s.size());
+    for (char c : s) {
+        if (c == '\'') r += "''";
+        else r += c;
+    }
+    return r;
+}
 
 class Renderer {
 public:
@@ -569,7 +623,7 @@ private:
             if (i > 0) out += ", ";
             const auto& f = obj.fields[i];
             out += "'";
-            out += f.key;
+            out += sql_escape_key(f.key);
             out += "', ";
             if (f.value.empty()) {
                 out += f.key;

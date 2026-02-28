@@ -1,0 +1,30 @@
+sqldeep — Third-Party Notices
+
+This project includes the following third-party components:
+
+================================================================================
+
+doctest 2.4.12
+https://github.com/doctest/doctest
+
+Copyright (c) 2016-2023 Viktor Kirilov
+Licensed under the MIT License.
+See vendor/include/doctest.LICENSE for the full license text.
+
+Used for: unit testing (test-only dependency, not part of the library).
+
+================================================================================
+
+SQLite 3.48.0
+https://sqlite.org/
+
+The author disclaims copyright to this source code. In place of a legal
+notice, here is a blessing:
+
+    May you do good and not evil.
+    May you find forgiveness for yourself and forgive others.
+    May you share freely, never taking more than you give.
+
+SQLite is in the public domain. See vendor/src/sqlite3.LICENSE.
+
+Used for: integration testing (test-only dependency, not part of the library).
