@@ -11,3 +11,8 @@ maintenance activities. Append-only — newest entries at the bottom.
   - Number lexing accepts partial floats like `1.` (low — cosmetic, not a security issue)
   - Operator table is a linear scan (info — fine for current token set size)
   - `assert()` used in a few places instead of throwing (info — only triggers on internal logic errors)
+
+## 2026-02-28 — /release v0.2.0
+
+- **Commit**: `51f6359`
+- **Outcome**: Released v0.2.0. Added auto-join syntax (`c->orders`) with lexer pre-scan for alias resolution, agents-guide.md, STABILITY.md. All 55 tests pass (7 new: 5 transpilation, 2 SQLite integration).
