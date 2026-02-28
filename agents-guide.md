@@ -61,6 +61,9 @@ SQLDEEP_VERSION_PATCH // 0
 | Renamed | `order_id: id` | `'order_id', id` |
 | Quoted key | `"order id": id` | `'order id', id` |
 
+- Auto-join: `FROM c->orders o` expands to
+  `FROM orders o WHERE o.customers_id = c.customers_id`
+  (convention: PK = `<table>_id`, FK = same column name in child table).
 - `//` line comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }` or `[ ]` passes through unchanged.
@@ -91,25 +94,33 @@ SQLDEEP_VERSION_PATCH // 0
 SELECT { id, name, email } FROM users WHERE active = 1
 ```
 
-### Nested one-to-many
+### Nested one-to-many (auto-join)
 
 ```
 SELECT {
-    id,
-    name,
-    orders: SELECT { order_id: id, total } FROM orders o WHERE o.cid = c.id,
+    customers_id, name,
+    orders: SELECT { orders_id, total } FROM c->orders,
 } FROM customers c
 ```
 
-### Three-level nesting
+### Three-level nesting (auto-join)
 
 ```
 SELECT {
-    id,
+    customers_id, name,
     orders: SELECT {
-        order_id: id,
-        items: SELECT { name, qty } FROM items i WHERE i.oid = o.id,
-    } FROM orders o WHERE o.cid = c.id,
+        orders_id,
+        items: SELECT { name, qty } FROM o->items ORDER BY items_id,
+    } FROM c->orders o ORDER BY orders_id,
+} FROM customers c
+```
+
+### Nested one-to-many (explicit WHERE)
+
+```
+SELECT {
+    id, name,
+    orders: SELECT { order_id: id, total } FROM orders o WHERE o.cid = c.id,
 } FROM customers c
 ```
 
