@@ -31,19 +31,26 @@ Pure `string → string` transformation. No SQLite dependency.
    strings (JSON-style keys), identifiers, numbers, operators.
 
 2. **AST** — `SqlParts` (vector of string | DeepSelect | ObjectLiteral |
-   ArrayLiteral) is the spine. Represents SQL-inside-JSON-inside-SQL to
-   arbitrary nesting depth.
+   ArrayLiteral | AutoJoin) is the spine. Represents SQL-inside-JSON-inside-SQL
+   to arbitrary nesting depth.
 
-3. **Parser** — unified recursive descent. Scans SQL tokens, descending into
+3. **Alias pre-scan** — before parsing, a lightweight lexer pass builds a global
+   `alias → table name` map from FROM/JOIN clauses. This allows `->` auto-join
+   resolution even when the alias definition appears later in the source
+   (SQL defines aliases in FROM, which comes after the SELECT projection).
+
+4. **Parser** — unified recursive descent. Scans SQL tokens, descending into
    deep construct parsing when `SELECT {`, `SELECT [`, `{`, or `[` is
    encountered. Handles `(SELECT {/[)` subquery pattern specially to avoid
    double-wrapping parens. Tracks paren depth and string literals to
-   distinguish structural commas from expression-internal commas.
+   distinguish structural commas from expression-internal commas. Detects
+   `ident->ident` auto-join patterns and emits `AutoJoin` AST nodes.
 
-4. **Renderer** — walks AST, emits standard SQL. Object literals become
+5. **Renderer** — walks AST, emits standard SQL. Object literals become
    `json_object(...)`, array literals become `json_array(...)`, deep selects
    at top level emit `SELECT json_object/json_group_array(...)`, nested deep
-   selects wrap in `(SELECT json_group_array(...))`.
+   selects wrap in `(SELECT json_group_array(...))`, auto-joins emit
+   `FROM child WHERE child.parent_id = alias.parent_id`.
 
 ### Syntax
 
@@ -55,6 +62,8 @@ Pure `string → string` transformation. No SQLite dependency.
 - Bare field: `id,` → `'id', id`
 - Renamed: `order_id: id` → `'order_id', id`
 - Double-quoted key: `"order id": id` → `'order id', id`
+- Auto-join: `FROM c->orders o` → `FROM orders o WHERE o.customers_id = c.customers_id`
+  (convention: PK = `<table>_id`, FK = same column name in child table)
 - `//` line comments stripped
 - Trailing commas allowed
 

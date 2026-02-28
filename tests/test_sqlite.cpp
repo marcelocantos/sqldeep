@@ -296,6 +296,61 @@ TEST_CASE("sqlite: SQL doubled-quote string") {
 
 // ── SQL passthrough ─────────────────────────────────────────────────
 
+// ── Auto-join (-> syntax) ──────────────────────────────────────────
+
+TEST_CASE("sqlite: two-level auto-join") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER, total REAL);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO orders VALUES(10, 1, 99.5);
+        INSERT INTO orders VALUES(11, 1, 42.0);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            customers_id, name,
+            orders: SELECT { orders_id, total }
+                    FROM c->orders ORDER BY orders_id,
+        } FROM customers c
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] ==
+        R"({"customers_id":1,"name":"alice","orders":[{"orders_id":10,"total":99.5},{"orders_id":11,"total":42.0}]})");
+}
+
+TEST_CASE("sqlite: three-level auto-join") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER);
+        CREATE TABLE items(items_id INTEGER PRIMARY KEY, orders_id INTEGER, name TEXT, qty INTEGER);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO orders VALUES(10, 1);
+        INSERT INTO items VALUES(100, 10, 'widget', 3);
+        INSERT INTO items VALUES(101, 10, 'gadget', 1);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            customers_id, name,
+            orders: SELECT {
+                orders_id,
+                items: SELECT { name, qty }
+                       FROM o->items ORDER BY items_id,
+            } FROM c->orders o ORDER BY orders_id,
+        } FROM customers c
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] ==
+        R"({"customers_id":1,"name":"alice","orders":[{"orders_id":10,"items":[{"name":"widget","qty":3},{"name":"gadget","qty":1}]}]})");
+}
+
+// ── SQL passthrough ─────────────────────────────────────────────────
+
 TEST_CASE("sqlite: plain SQL passthrough") {
     DbGuard g;
     exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");

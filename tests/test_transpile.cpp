@@ -269,3 +269,66 @@ TEST_CASE("excessive nesting depth throws") {
 TEST_CASE("unmatched closing paren throws") {
     CHECK_THROWS_AS(transpile("SELECT { id } FROM t )"), Error);
 }
+
+// ── Auto-join (-> syntax) ─────────────────────────────────────────
+
+TEST_CASE("basic auto-join") {
+    CHECK(transpile(
+        "SELECT { customers_id, name, "
+        "orders: SELECT { orders_id } FROM c->orders "
+        "} FROM customers c") ==
+        "SELECT json_object('customers_id', customers_id, 'name', name, "
+        "'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) "
+        "FROM orders WHERE orders.customers_id = c.customers_id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("auto-join with child alias") {
+    CHECK(transpile(
+        "SELECT { customers_id, "
+        "orders: SELECT { orders_id } FROM c->orders o ORDER BY orders_id "
+        "} FROM customers c") ==
+        "SELECT json_object('customers_id', customers_id, "
+        "'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) "
+        "FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("three-level auto-join") {
+    auto input = R"(SELECT {
+    customers_id, name,
+    orders: SELECT {
+        orders_id,
+        items: SELECT { items_id, qty } FROM o->items i ORDER BY items_id,
+    } FROM c->orders o ORDER BY orders_id,
+} FROM customers c)";
+
+    auto expected =
+        "SELECT json_object('customers_id', customers_id, 'name', name, 'orders', "
+        "(SELECT json_group_array(json_object('orders_id', orders_id, 'items', "
+        "(SELECT json_group_array(json_object('items_id', items_id, 'qty', qty)) "
+        "FROM items i WHERE i.orders_id = o.orders_id ORDER BY items_id)"
+        ")) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)"
+        ") FROM customers c";
+
+    CHECK(transpile(input) == expected);
+}
+
+TEST_CASE("auto-join unknown alias throws") {
+    CHECK_THROWS_AS(transpile(
+        "SELECT { orders_id } FROM x->orders"), Error);
+}
+
+TEST_CASE("auto-join coexists with explicit WHERE") {
+    CHECK(transpile(
+        "SELECT { customers_id, "
+        "orders: SELECT { orders_id } FROM c->orders, "
+        "notes: SELECT { note } FROM notes WHERE notes.customers_id = c.customers_id "
+        "} FROM customers c") ==
+        "SELECT json_object('customers_id', customers_id, "
+        "'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) "
+        "FROM orders WHERE orders.customers_id = c.customers_id), "
+        "'notes', (SELECT json_group_array(json_object('note', note)) "
+        "FROM notes WHERE notes.customers_id = c.customers_id)"
+        ") FROM customers c");
+}
