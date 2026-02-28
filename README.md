@@ -121,6 +121,9 @@ Requires C++20 and [mk](https://github.com/marcelocantos/mk).
 Copy `sqldeep.h` and `sqldeep.cpp` into your project. No external dependencies
 at runtime.
 
+If you use an agentic coding tool, include `agents-guide.md` in your project
+context.
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
