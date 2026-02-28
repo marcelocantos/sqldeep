@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#define SQLDEEP_VERSION       "0.1.0"
+#define SQLDEEP_VERSION       "0.2.0"
 #define SQLDEEP_VERSION_MAJOR 0
-#define SQLDEEP_VERSION_MINOR 1
+#define SQLDEEP_VERSION_MINOR 2
 #define SQLDEEP_VERSION_PATCH 0
 
 #include <stdexcept>
