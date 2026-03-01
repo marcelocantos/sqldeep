@@ -253,7 +253,7 @@ struct JoinPath {
 };
 
 struct DeepSelect {
-    std::variant<ObjectLiteral, ArrayLiteral> projection;
+    std::variant<ObjectLiteral, ArrayLiteral, SqlParts> projection;
     SqlParts tail;
 };
 
@@ -403,12 +403,8 @@ private:
                 if (t.type == TokenType::Semicolon) break;
 
                 if (is_keyword(t, "SELECT")) {
-                    Token next = lex_.peek();
-                    if (next.type == TokenType::LBrace ||
-                        next.type == TokenType::LBracket) {
-                        lex_.restore(st);
-                        return true;
-                    }
+                    lex_.restore(st);
+                    return true;
                 }
             }
 
@@ -423,19 +419,19 @@ private:
         return false;
     }
 
-    // Parse FROM-first deep select: FROM ... SELECT {/[
+    // Parse FROM-first select: FROM ... SELECT ...
     // Current position is before FROM.
-    std::unique_ptr<DeepSelect> parse_from_first_deep_select(
+    std::unique_ptr<DeepSelect> parse_from_first_select(
             bool stop_comma, bool stop_rbrace,
             bool stop_rbracket, bool stop_rparen,
             int depth) {
         Token from_tok = lex_.peek();
         check_depth(depth, from_tok.line, from_tok.col);
 
-        // Parse body (FROM ... WHERE ... etc.) until SELECT {/[
+        // Parse body (FROM ... WHERE ... etc.) until SELECT
         auto body = parse_sql_parts(stop_comma, stop_rbrace,
                                     stop_rbracket, stop_rparen,
-                                    depth, /*stop_at_select_deep=*/true);
+                                    depth, /*stop_at_select=*/true);
 
         // Consume SELECT
         Token select_tok = lex_.next();
@@ -451,8 +447,10 @@ private:
         } else if (t.type == TokenType::LBracket) {
             ds->projection = std::move(*parse_array_literal(depth));
         } else {
-            lex_.error("expected '{' or '[' after SELECT",
-                       select_tok.line, select_tok.col);
+            // Plain SELECT — just rearrange, no JSON wrapping
+            ds->projection = parse_sql_parts(stop_comma, stop_rbrace,
+                                             stop_rbracket, stop_rparen,
+                                             depth);
         }
 
         ds->tail = std::move(body);
@@ -465,7 +463,7 @@ private:
                              bool stop_rbracket,
                              bool stop_rparen,
                              int depth,
-                             bool stop_at_select_deep = false) {
+                             bool stop_at_select = false) {
         SqlParts parts;
         std::string accum;
         size_t last_end = 0; // src position after last consumed raw token
@@ -551,14 +549,14 @@ private:
                         continue;
                     }
                 }
-                // Not (SELECT {/[) — try (FROM ... SELECT {/[)
+                // Not (SELECT {/[) — try (FROM ... SELECT ...)
                 lex_.restore(st);
                 lex_.next(); // re-consume (
                 t2 = lex_.peek();
                 if (is_keyword(t2, "FROM") &&
                     is_from_first(false, false, false, /*stop_rparen=*/true)) {
                     flush_before(t);
-                    auto ds = parse_from_first_deep_select(
+                    auto ds = parse_from_first_select(
                         /*stop_comma=*/false, /*stop_rbrace=*/false,
                         /*stop_rbracket=*/false, /*stop_rparen=*/true,
                         depth + 1);
@@ -566,7 +564,22 @@ private:
                     if (rp.type != TokenType::RParen)
                         lex_.error("expected ')' after subquery",
                                    rp.line, rp.col);
-                    parts.push_back(std::move(ds));
+                    // Plain projection: inline with explicit parens
+                    // (deep projections use DeepSelect whose renderer
+                    // adds parens when nested)
+                    if (std::holds_alternative<SqlParts>(ds->projection)) {
+                        parts.push_back(std::string("(SELECT "));
+                        for (auto& p : std::get<SqlParts>(ds->projection))
+                            parts.push_back(std::move(p));
+                        if (!ds->tail.empty()) {
+                            parts.push_back(std::string(" "));
+                            for (auto& p : ds->tail)
+                                parts.push_back(std::move(p));
+                        }
+                        parts.push_back(std::string(")"));
+                    } else {
+                        parts.push_back(std::move(ds));
+                    }
                     last_end = rp.src_end;
                     need_space = true;
                     continue;
@@ -578,7 +591,7 @@ private:
 
             // Check for SELECT {/[ at depth 0 (top-level deep select)
             if (is_keyword(t, "SELECT") && paren_depth == 0 &&
-                !stop_at_select_deep) {
+                !stop_at_select) {
                 auto st = lex_.save();
                 lex_.next(); // consume SELECT
                 Token t2 = lex_.peek();
@@ -598,27 +611,19 @@ private:
                 lex_.restore(st);
             }
 
-            // stop_at_select_deep: break when SELECT {/[ at depth 0
-            if (stop_at_select_deep && is_keyword(t, "SELECT") &&
+            // stop_at_select: break when SELECT at depth 0
+            if (stop_at_select && is_keyword(t, "SELECT") &&
                 paren_depth == 0) {
-                auto st = lex_.save();
-                lex_.next(); // consume SELECT
-                Token t2 = lex_.peek();
-                if (t2.type == TokenType::LBrace ||
-                    t2.type == TokenType::LBracket) {
-                    lex_.restore(st);
-                    break;
-                }
-                lex_.restore(st);
+                break;
             }
 
             // Check for FROM-first: FROM ... SELECT {/[
             if (is_keyword(t, "FROM") && paren_depth == 0 &&
-                !stop_at_select_deep) {
+                !stop_at_select) {
                 if (is_from_first(stop_comma, stop_rbrace,
                                   stop_rbracket, stop_rparen)) {
                     flush_before(t);
-                    auto ds = parse_from_first_deep_select(
+                    auto ds = parse_from_first_select(
                         stop_comma, stop_rbrace,
                         stop_rbracket, stop_rparen,
                         depth + 1);
@@ -881,6 +886,19 @@ private:
     }
 
     void render_deep_select(const DeepSelect& ds, std::string& out, bool nested) {
+        // Plain FROM-first: just rearrange, no JSON wrapping
+        if (std::holds_alternative<SqlParts>(ds.projection)) {
+            if (nested) out += "(";
+            out += "SELECT ";
+            render_parts(std::get<SqlParts>(ds.projection), out, true);
+            if (!ds.tail.empty()) {
+                out += " ";
+                render_parts(ds.tail, out, true);
+            }
+            if (nested) out += ")";
+            return;
+        }
+
         if (nested) out += "(";
         out += "SELECT ";
 

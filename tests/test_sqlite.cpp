@@ -555,6 +555,44 @@ TEST_CASE("sqlite: bridge join with FROM-first") {
         R"({"customers_id":1,"name":"alice","accounts":[{"acct_name":"savings"},{"acct_name":"checking"}]})");
 }
 
+// ── Plain FROM-first ─────────────────────────────────────────────────
+
+TEST_CASE("sqlite: plain from-first") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'alice')");
+    exec(g.db, "INSERT INTO t VALUES(2, 'bob')");
+
+    auto rows = transpile_and_query(g.db,
+        "FROM t ORDER BY id SELECT id, name");
+
+    REQUIRE(rows.size() == 2);
+    // Plain SELECT returns columns, not JSON
+    CHECK(rows[0] == "1");
+    CHECK(rows[1] == "2");
+}
+
+TEST_CASE("sqlite: plain from-first as scalar subquery") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(id INTEGER PRIMARY KEY, cid INTEGER, total REAL);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO orders VALUES(10, 1, 99.5);
+        INSERT INTO orders VALUES(11, 1, 42.0);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            name,
+            total: FROM orders WHERE cid = c.id SELECT sum(total),
+        } FROM customers c
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"name":"alice","total":141.5})");
+}
+
 // ── SQL passthrough ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: plain SQL passthrough") {
