@@ -255,6 +255,7 @@ struct JoinPath {
 struct DeepSelect {
     std::variant<ObjectLiteral, ArrayLiteral, SqlParts> projection;
     SqlParts tail;
+    bool singular = false; // SELECT/1: no json_group_array, add LIMIT 1
 };
 
 // ── Parser ──────────────────────────────────────────────────────────
@@ -384,6 +385,22 @@ private:
             lex_.error("maximum nesting depth exceeded", line, col);
     }
 
+    // Try to consume /1 after SELECT. Returns true if consumed.
+    bool try_consume_singular() {
+        auto st = lex_.save();
+        Token slash = lex_.peek();
+        if (slash.type == TokenType::Other && slash.text == "/") {
+            lex_.next();
+            Token one = lex_.peek();
+            if (one.type == TokenType::Number && one.text == "1") {
+                lex_.next();
+                return true;
+            }
+        }
+        lex_.restore(st);
+        return false;
+    }
+
     // Lookahead: is the current position the start of a FROM-first deep
     // select?  Scans forward (tracking nesting depth) looking for
     // SELECT {/[ at depth 0.  Restores lexer state before returning.
@@ -433,14 +450,16 @@ private:
                                     stop_rbracket, stop_rparen,
                                     depth, /*stop_at_select=*/true);
 
-        // Consume SELECT
+        // Consume SELECT [/1]
         Token select_tok = lex_.next();
         if (!is_keyword(select_tok, "SELECT"))
             lex_.error("expected SELECT after FROM clause",
                        select_tok.line, select_tok.col);
+        bool singular = try_consume_singular();
 
         // Parse projection
         auto ds = std::make_unique<DeepSelect>();
+        ds->singular = singular;
         Token t = lex_.peek();
         if (t.type == TokenType::LBrace) {
             ds->projection = std::move(*parse_object_literal(depth));
@@ -532,11 +551,12 @@ private:
                 Token t2 = lex_.peek();
                 if (is_keyword(t2, "SELECT")) {
                     lex_.next(); // consume SELECT
+                    bool singular = try_consume_singular();
                     Token t3 = lex_.peek();
                     if (t3.type == TokenType::LBrace || t3.type == TokenType::LBracket) {
-                        // Found (SELECT {/[)
+                        // Found (SELECT[/1] {/[)
                         flush_before(t);
-                        auto ds = parse_deep_select(t2,
+                        auto ds = parse_deep_select(t2, singular,
                             /*stop_comma=*/false, /*stop_rbrace=*/false,
                             /*stop_rbracket=*/false, /*stop_rparen=*/true,
                             depth + 1);
@@ -589,17 +609,19 @@ private:
                 lex_.restore(st);
             }
 
-            // Check for SELECT {/[ at depth 0 (top-level deep select)
+            // Check for SELECT[/1] {/[ at depth 0 (top-level deep select)
             if (is_keyword(t, "SELECT") && paren_depth == 0 &&
                 !stop_at_select) {
                 auto st = lex_.save();
                 lex_.next(); // consume SELECT
+                bool singular = try_consume_singular();
                 Token t2 = lex_.peek();
                 if (t2.type == TokenType::LBrace || t2.type == TokenType::LBracket) {
                     flush_before(t);
                     Token sel = {TokenType::Ident, "SELECT", t.line, t.col,
                                  t.src_begin, t.src_end};
-                    auto ds = parse_deep_select(sel, stop_comma, stop_rbrace,
+                    auto ds = parse_deep_select(sel, singular,
+                                                stop_comma, stop_rbrace,
                                                 stop_rbracket, stop_rparen,
                                                 depth + 1);
                     parts.push_back(std::move(ds));
@@ -717,13 +739,16 @@ private:
     }
 
     // Parse deep select — SELECT keyword has already been consumed.
+    // singular: true if /1 was already consumed after SELECT.
     std::unique_ptr<DeepSelect> parse_deep_select(
             const Token& select_tok,
+            bool singular,
             bool stop_comma, bool stop_rbrace,
             bool stop_rbracket, bool stop_rparen,
             int depth) {
         check_depth(depth, select_tok.line, select_tok.col);
         auto ds = std::make_unique<DeepSelect>();
+        ds->singular = singular;
 
         Token t = lex_.peek();
         if (t.type == TokenType::LBrace) {
@@ -903,30 +928,33 @@ private:
         out += "SELECT ";
 
         bool is_object = std::holds_alternative<ObjectLiteral>(ds.projection);
+        bool use_group = nested && !ds.singular;
 
-        if (nested) out += "json_group_array(";
+        if (use_group) out += "json_group_array(";
 
         if (is_object) {
             render_object(std::get<ObjectLiteral>(ds.projection), out);
         } else {
             const auto& arr = std::get<ArrayLiteral>(ds.projection);
             if (arr.elements.size() == 1) {
-                if (!nested) out += "json_group_array(";
+                if (!nested && !ds.singular) out += "json_group_array(";
                 render_parts(arr.elements[0], out, /*nested=*/true);
-                if (!nested) out += ")";
+                if (!nested && !ds.singular) out += ")";
             } else {
-                if (!nested) out += "json_group_array(";
+                if (!nested && !ds.singular) out += "json_group_array(";
                 render_array(arr, out);
-                if (!nested) out += ")";
+                if (!nested && !ds.singular) out += ")";
             }
         }
 
-        if (nested) out += ")";
+        if (use_group) out += ")";
 
         if (!ds.tail.empty()) {
             out += " ";
             render_parts(ds.tail, out, /*nested=*/true);
         }
+
+        if (ds.singular) out += " LIMIT 1";
 
         if (nested) out += ")";
     }

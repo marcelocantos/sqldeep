@@ -40,6 +40,9 @@ Snapshot as of v0.3.0.
 | Nested FROM-first select | `field: FROM t SELECT { ... }` | **Stable** |
 | Array select | `SELECT [expr] FROM t` | **Stable** |
 | FROM-first array select | `FROM t SELECT [expr]` | **Stable** |
+| Singular object select | `SELECT/1 { id } FROM t` | **Needs review** |
+| Singular array select | `SELECT/1 [expr] FROM t` | **Needs review** |
+| FROM-first singular select | `FROM t SELECT/1 { id }` | **Needs review** |
 | Inline array | `[expr, ...]` | **Stable** |
 | Inline object | `{ fields }` | **Stable** |
 | Bare field | `id,` | **Stable** |
@@ -61,6 +64,7 @@ Snapshot as of v0.3.0.
 | Object select | `json_object(...)` | **Stable** |
 | Nested object select | `(SELECT json_group_array(json_object(...)))` | **Stable** |
 | Array select | `json_group_array(...)` | **Stable** |
+| Singular select | `json_object(...) ... LIMIT 1` (no array wrapping) | **Needs review** |
 | Inline array | `json_array(...)` | **Stable** |
 | Forward join | `FROM table WHERE table.parent_id = alias.parent_id` | **Needs review** |
 | Reverse join | `FROM table WHERE alias.table_id = table.table_id` | **Needs review** |
@@ -76,6 +80,8 @@ Before 1.0:
   patterns are new (v0.2.0–v0.3.0). Needs real-world usage to confirm the
   syntax, FK convention, and rendering are right. The `ON` override clause is
   planned but not yet implemented.
+- **Singular select (`SELECT/1`)**: New in v0.4.0. The `/1` suffix is compact
+  but unusual — needs usage feedback to confirm it's the right spelling.
 - **Error messages**: Error text is not part of the stability contract, but
   should be consistently helpful before 1.0.
 - **Distribution story**: No install target, pkg-config, or CMake find-module.

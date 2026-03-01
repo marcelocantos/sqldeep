@@ -555,6 +555,47 @@ TEST_CASE("sqlite: bridge join with FROM-first") {
         R"({"customers_id":1,"name":"alice","accounts":[{"acct_name":"savings"},{"acct_name":"checking"}]})");
 }
 
+// ── Singular select (SELECT/1) ───────────────────────────────────────
+
+TEST_CASE("sqlite: singular object select") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, vendors_id INTEGER);
+        CREATE TABLE vendors(vendors_id INTEGER PRIMARY KEY, name TEXT);
+        INSERT INTO vendors VALUES(1, 'Acme');
+        INSERT INTO orders VALUES(10, 1);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            orders_id,
+            vendor: SELECT/1 { name } FROM o<-vendors v,
+        } FROM orders o
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"orders_id":10,"vendor":{"name":"Acme"}})");
+}
+
+TEST_CASE("sqlite: singular returns null for zero rows") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, vendors_id INTEGER);
+        CREATE TABLE vendors(vendors_id INTEGER PRIMARY KEY, name TEXT);
+        INSERT INTO orders VALUES(10, 999);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            orders_id,
+            vendor: SELECT/1 { name } FROM o<-vendors v,
+        } FROM orders o
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"orders_id":10,"vendor":null})");
+}
+
 // ── Plain FROM-first ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: plain from-first") {
