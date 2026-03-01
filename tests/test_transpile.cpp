@@ -575,3 +575,61 @@ TEST_CASE("missing table after arrow throws") {
     CHECK_THROWS_AS(transpile(
         "SELECT { id } FROM c-> } FROM customers c"), Error);
 }
+
+// ── Singular select (SELECT/1) ─────────────────────────────────────
+
+TEST_CASE("singular object select") {
+    CHECK(transpile(
+        "SELECT { orders_id, "
+        "vendor: SELECT/1 { name } FROM o<-vendors v "
+        "} FROM orders o") ==
+        "SELECT json_object('orders_id', orders_id, "
+        "'vendor', (SELECT json_object('name', name) "
+        "FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)"
+        ") FROM orders o");
+}
+
+TEST_CASE("singular array select single element") {
+    CHECK(transpile(
+        "SELECT { id, "
+        "top: SELECT/1 [score] FROM scores WHERE uid = u.id ORDER BY score DESC "
+        "} FROM users u") ==
+        "SELECT json_object('id', id, "
+        "'top', (SELECT score "
+        "FROM scores WHERE uid = u.id ORDER BY score DESC LIMIT 1)"
+        ") FROM users u");
+}
+
+TEST_CASE("singular array select multi element") {
+    CHECK(transpile(
+        "SELECT { id, "
+        "pair: SELECT/1 [a, b] FROM pairs WHERE uid = u.id "
+        "} FROM users u") ==
+        "SELECT json_object('id', id, "
+        "'pair', (SELECT json_array(a, b) "
+        "FROM pairs WHERE uid = u.id LIMIT 1)"
+        ") FROM users u");
+}
+
+TEST_CASE("singular from-first") {
+    CHECK(transpile(
+        "SELECT { orders_id, "
+        "vendor: FROM o<-vendors v SELECT/1 { name } "
+        "} FROM orders o") ==
+        "SELECT json_object('orders_id', orders_id, "
+        "'vendor', (SELECT json_object('name', name) "
+        "FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)"
+        ") FROM orders o");
+}
+
+TEST_CASE("singular top-level") {
+    CHECK(transpile("SELECT/1 { id, name } FROM t") ==
+          "SELECT json_object('id', id, 'name', name) FROM t LIMIT 1");
+}
+
+TEST_CASE("singular in parenthesised subquery") {
+    CHECK(transpile(
+        "SELECT { id } FROM t WHERE x = (SELECT/1 { y } FROM t2)") ==
+        "SELECT json_object('id', id) FROM t WHERE x = "
+        "(SELECT json_object('y', y) FROM t2 LIMIT 1)");
+}
