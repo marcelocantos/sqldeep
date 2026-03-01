@@ -437,6 +437,43 @@ TEST_CASE("plain FROM still passes through") {
           "SELECT id, name FROM t WHERE x > 0");
 }
 
+TEST_CASE("from-first plain select") {
+    CHECK(transpile("FROM t SELECT id, name") ==
+          "SELECT id, name FROM t");
+}
+
+TEST_CASE("from-first plain select with WHERE and ORDER BY") {
+    CHECK(transpile("FROM t WHERE x > 0 ORDER BY y SELECT id, name") ==
+          "SELECT id, name FROM t WHERE x > 0 ORDER BY y");
+}
+
+TEST_CASE("from-first plain select star") {
+    CHECK(transpile("FROM t SELECT *") ==
+          "SELECT * FROM t");
+}
+
+TEST_CASE("from-first plain nested as scalar subquery") {
+    CHECK(transpile(
+        "SELECT { id, total: FROM orders WHERE cid = c.id SELECT sum(total) } FROM customers c") ==
+        "SELECT json_object('id', id, 'total', "
+        "(SELECT sum(total) FROM orders WHERE cid = c.id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("from-first plain in parenthesised subquery") {
+    CHECK(transpile(
+        "SELECT id FROM t WHERE x IN (FROM t2 SELECT id)") ==
+        "SELECT id FROM t WHERE x IN (SELECT id FROM t2)");
+}
+
+TEST_CASE("from-first plain mixed with deep") {
+    CHECK(transpile(
+        "FROM customers c SELECT { id, total: FROM orders WHERE cid = c.id SELECT sum(total) }") ==
+        "SELECT json_object('id', id, 'total', "
+        "(SELECT sum(total) FROM orders WHERE cid = c.id)"
+        ") FROM customers c");
+}
+
 // ── Reverse join (<- syntax) ────────────────────────────────────────
 
 TEST_CASE("single reverse join") {

@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            mk_asset: mk-0.7.0-linux-amd64.tar.gz
+          - os: macos-latest
+            mk_asset: mk-0.7.0-darwin-arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mk
+        run: |
+          curl -fsSL "https://github.com/marcelocantos/mk/releases/download/v0.7.0/${{ matrix.mk_asset }}" \
+            | tar xz
+          sudo mv mk /usr/local/bin/mk
+
+      - name: Build and run tests
+        run: mk test
