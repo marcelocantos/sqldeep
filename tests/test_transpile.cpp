@@ -5,6 +5,7 @@
 
 using sqldeep::transpile;
 using sqldeep::Error;
+using sqldeep::ForeignKey;
 
 // ── Basic object ────────────────────────────────────────────────────
 
@@ -632,4 +633,93 @@ TEST_CASE("singular in parenthesised subquery") {
         "SELECT { id } FROM t WHERE x = (SELECT/1 { y } FROM t2)") ==
         "SELECT json_object('id', id) FROM t WHERE x = "
         "(SELECT json_object('y', y) FROM t2 LIMIT 1)");
+}
+
+// ── FK-guided joins ──────────────────────────────────────────────────
+
+TEST_CASE("fk forward join") {
+    std::vector<ForeignKey> fks = {
+        {"orders", "customers", {{"cust_id", "id"}}},
+    };
+    CHECK(transpile(
+        "SELECT { id, orders: SELECT { total } "
+        "FROM c->orders o } FROM customers c", fks) ==
+        "SELECT json_object('id', id, 'orders', "
+        "(SELECT json_group_array(json_object('total', total)) "
+        "FROM orders o WHERE o.cust_id = c.id)) "
+        "FROM customers c");
+}
+
+TEST_CASE("fk reverse join") {
+    std::vector<ForeignKey> fks = {
+        {"orders", "vendors", {{"vendor_ref", "vid"}}},
+    };
+    CHECK(transpile(
+        "SELECT { orders_id, "
+        "vendor: SELECT/1 { name } FROM o<-vendors v "
+        "} FROM orders o", fks) ==
+        "SELECT json_object('orders_id', orders_id, "
+        "'vendor', (SELECT json_object('name', name) "
+        "FROM vendors v WHERE o.vendor_ref = v.vid LIMIT 1)) "
+        "FROM orders o");
+}
+
+TEST_CASE("fk chain") {
+    std::vector<ForeignKey> fks = {
+        {"orders", "customers", {{"cust_id", "id"}}},
+        {"items", "orders", {{"order_ref", "oid"}}},
+    };
+    CHECK(transpile(
+        "SELECT { name, items: SELECT { name } "
+        "FROM c->orders o->items i } FROM customers c", fks) ==
+        "SELECT json_object('name', name, 'items', "
+        "(SELECT json_group_array(json_object('name', name)) "
+        "FROM orders o JOIN items i ON i.order_ref = o.oid "
+        "WHERE o.cust_id = c.id)) "
+        "FROM customers c");
+}
+
+TEST_CASE("fk bridge") {
+    std::vector<ForeignKey> fks = {
+        {"enrollment", "students", {{"sid", "id"}}},
+        {"enrollment", "courses", {{"cid", "id"}}},
+    };
+    CHECK(transpile(
+        "SELECT { name, courses: SELECT { title } "
+        "FROM s->enrollment<-courses co } FROM students s", fks) ==
+        "SELECT json_object('name', name, 'courses', "
+        "(SELECT json_group_array(json_object('title', title)) "
+        "FROM enrollment JOIN courses co ON enrollment.cid = co.id "
+        "WHERE enrollment.sid = s.id)) "
+        "FROM students s");
+}
+
+TEST_CASE("fk multi-column") {
+    std::vector<ForeignKey> fks = {
+        {"orders", "customers", {{"cust_id", "id"}, {"region", "region"}}},
+    };
+    CHECK(transpile(
+        "SELECT { id, orders: SELECT { total } "
+        "FROM c->orders o } FROM customers c", fks) ==
+        "SELECT json_object('id', id, 'orders', "
+        "(SELECT json_group_array(json_object('total', total)) "
+        "FROM orders o WHERE o.cust_id = c.id AND o.region = c.region)) "
+        "FROM customers c");
+}
+
+TEST_CASE("fk missing error") {
+    std::vector<ForeignKey> fks = {};
+    CHECK_THROWS_AS(transpile(
+        "SELECT { orders: SELECT { total } "
+        "FROM c->orders o } FROM customers c", fks), Error);
+}
+
+TEST_CASE("fk ambiguous error") {
+    std::vector<ForeignKey> fks = {
+        {"orders", "addresses", {{"billing_addr_id", "id"}}},
+        {"orders", "addresses", {{"shipping_addr_id", "id"}}},
+    };
+    CHECK_THROWS_AS(transpile(
+        "SELECT { addr: SELECT { city } "
+        "FROM o->addresses a } FROM orders o", fks), Error);
 }

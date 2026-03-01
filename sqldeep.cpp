@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <variant>
@@ -882,8 +883,54 @@ static std::string sql_escape_key(const std::string& s) {
     return r;
 }
 
+// FK index: maps (from_table, to_table) → list of FKs between them.
+using FkIndex = std::map<std::pair<std::string,std::string>,
+                         std::vector<const ForeignKey*>>;
+
+FkIndex build_fk_index(const std::vector<ForeignKey>& fks) {
+    FkIndex idx;
+    for (const auto& fk : fks) {
+        idx[{fk.from_table, fk.to_table}].push_back(&fk);
+    }
+    return idx;
+}
+
+// Resolve column pairs for a join between child_table and parent_table.
+// In convention mode (fk_index == nullptr), returns {(parent+"_id", parent+"_id")}.
+// In FK mode, looks up the index and errors if 0 or 2+ matches.
+std::vector<std::pair<std::string,std::string>>
+resolve_fk_columns(const std::string& child_table,
+                   const std::string& parent_table,
+                   const FkIndex* fk_index) {
+    if (!fk_index) {
+        // Convention mode
+        std::string col = parent_table + "_id";
+        return {{col, col}};
+    }
+    auto it = fk_index->find({child_table, parent_table});
+    if (it == fk_index->end() || it->second.empty()) {
+        throw Error("no foreign key from '" + child_table + "' to '" +
+                    parent_table + "'", 0, 0);
+    }
+    if (it->second.size() > 1) {
+        throw Error("ambiguous foreign key from '" + child_table + "' to '" +
+                    parent_table + "' (" + std::to_string(it->second.size()) +
+                    " candidates)", 0, 0);
+    }
+    const auto& fk = *it->second[0];
+    std::vector<std::pair<std::string,std::string>> cols;
+    cols.reserve(fk.columns.size());
+    for (const auto& cp : fk.columns) {
+        cols.emplace_back(cp.from_column, cp.to_column);
+    }
+    return cols;
+}
+
 class Renderer {
 public:
+    explicit Renderer(const FkIndex* fk_index = nullptr)
+        : fk_index_(fk_index) {}
+
     std::string render_document(const SqlParts& parts) {
         std::string out;
         render_parts(parts, out, /*nested=*/false);
@@ -985,6 +1032,19 @@ private:
         out += ")";
     }
 
+    // Emit "lhs.col1 = rhs.col1 [AND lhs.col2 = rhs.col2 ...]"
+    static void emit_join_condition(
+            const std::vector<std::pair<std::string,std::string>>& cols,
+            const std::string& child_ref,
+            const std::string& parent_ref,
+            std::string& out) {
+        for (size_t i = 0; i < cols.size(); ++i) {
+            if (i > 0) out += " AND ";
+            out += child_ref + "." + cols[i].first + " = " +
+                   parent_ref + "." + cols[i].second;
+        }
+    }
+
     void render_join_path(const JoinPath& jp, std::string& out) {
         // Step 1: FROM target
         const auto& s1 = jp.steps[0];
@@ -1010,12 +1070,12 @@ private:
             out += " ON ";
             if (step.forward) {
                 // curr is child of prev
-                out += step_ref + "." + prev_table + "_id = " +
-                       prev_ref + "." + prev_table + "_id";
+                auto cols = resolve_fk_columns(step.table, prev_table, fk_index_);
+                emit_join_condition(cols, step_ref, prev_ref, out);
             } else {
                 // prev is child of curr
-                out += prev_ref + "." + step.table + "_id = " +
-                       step_ref + "." + step.table + "_id";
+                auto cols = resolve_fk_columns(prev_table, step.table, fk_index_);
+                emit_join_condition(cols, prev_ref, step_ref, out);
             }
             prev_table = step.table;
             prev_ref = step_ref;
@@ -1024,13 +1084,15 @@ private:
         // WHERE: correlate step 1 to start alias
         out += " WHERE ";
         if (s1.forward) {
-            out += s1_ref + "." + jp.start_table + "_id = " +
-                   jp.start_alias + "." + jp.start_table + "_id";
+            auto cols = resolve_fk_columns(s1.table, jp.start_table, fk_index_);
+            emit_join_condition(cols, s1_ref, jp.start_alias, out);
         } else {
-            out += jp.start_alias + "." + s1.table + "_id = " +
-                   s1_ref + "." + s1.table + "_id";
+            auto cols = resolve_fk_columns(jp.start_table, s1.table, fk_index_);
+            emit_join_condition(cols, jp.start_alias, s1_ref, out);
         }
     }
+
+    const FkIndex* fk_index_;
 };
 
 } // anonymous namespace
@@ -1043,6 +1105,17 @@ std::string transpile(const std::string& input) {
     Parser parser(lex, std::move(alias_map));
     SqlParts doc = parser.parse_document();
     Renderer renderer;
+    return renderer.render_document(doc);
+}
+
+std::string transpile(const std::string& input,
+                      const std::vector<ForeignKey>& foreign_keys) {
+    auto alias_map = build_alias_map(input);
+    Lexer lex(input);
+    Parser parser(lex, std::move(alias_map));
+    SqlParts doc = parser.parse_document();
+    auto fk_idx = build_fk_index(foreign_keys);
+    Renderer renderer(&fk_idx);
     return renderer.render_document(doc);
 }
 

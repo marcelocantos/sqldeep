@@ -67,6 +67,14 @@ std::vector<std::string> transpile_and_query(sqlite3* db,
     return query(db, sql);
 }
 
+// Transpile with FK info and execute.
+std::vector<std::string> transpile_and_query(
+        sqlite3* db, const std::string& deep_sql,
+        const std::vector<sqldeep::ForeignKey>& fks) {
+    std::string sql = sqldeep::transpile(deep_sql, fks);
+    return query(db, sql);
+}
+
 } // namespace
 
 // ── Single-table tests ──────────────────────────────────────────────
@@ -646,4 +654,60 @@ TEST_CASE("sqlite: plain SQL passthrough") {
 
     REQUIRE(rows.size() == 1);
     CHECK(rows[0] == "1");
+}
+
+// ── FK-guided joins ─────────────────────────────────────────────────
+
+TEST_CASE("sqlite: fk-guided join") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(id INTEGER PRIMARY KEY, cust_id INTEGER, total REAL,
+                            FOREIGN KEY(cust_id) REFERENCES customers(id));
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO orders VALUES(10, 1, 99.5);
+        INSERT INTO orders VALUES(11, 1, 42.0);
+    )");
+
+    std::vector<sqldeep::ForeignKey> fks = {
+        {"orders", "customers", {{"cust_id", "id"}}},
+    };
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            name,
+            orders: FROM c->orders o ORDER BY o.id SELECT { total },
+        } FROM customers c
+    )", fks);
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"name":"alice","orders":[{"total":99.5},{"total":42.0}]})");
+}
+
+TEST_CASE("sqlite: fk-guided multi-column join") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE regions(region TEXT, shop TEXT, name TEXT,
+                             PRIMARY KEY(region, shop));
+        CREATE TABLE sales(id INTEGER PRIMARY KEY,
+                           region TEXT, shop TEXT, amount REAL);
+        INSERT INTO regions VALUES('east', 'a', 'East A');
+        INSERT INTO regions VALUES('east', 'b', 'East B');
+        INSERT INTO sales VALUES(1, 'east', 'a', 100.0);
+        INSERT INTO sales VALUES(2, 'east', 'a', 200.0);
+        INSERT INTO sales VALUES(3, 'east', 'b', 50.0);
+    )");
+
+    std::vector<sqldeep::ForeignKey> fks = {
+        {"sales", "regions", {{"region", "region"}, {"shop", "shop"}}},
+    };
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            name,
+            sales: FROM r->sales s ORDER BY s.id SELECT { amount },
+        } FROM regions r ORDER BY r.region, r.shop
+    )", fks);
+
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0] == R"({"name":"East A","sales":[{"amount":100.0},{"amount":200.0}]})");
+    CHECK(rows[1] == R"({"name":"East B","sales":[{"amount":50.0}]})");
 }
