@@ -35,14 +35,20 @@ Snapshot as of v0.2.0.
 | Construct | Example | Stability |
 |-----------|---------|-----------|
 | Object select | `SELECT { id, name } FROM t` | **Stable** |
+| FROM-first object select | `FROM t SELECT { id, name }` | **Stable** |
 | Nested object select | `field: SELECT { ... } FROM t` | **Stable** |
+| Nested FROM-first select | `field: FROM t SELECT { ... }` | **Stable** |
 | Array select | `SELECT [expr] FROM t` | **Stable** |
+| FROM-first array select | `FROM t SELECT [expr]` | **Stable** |
 | Inline array | `[expr, ...]` | **Stable** |
 | Inline object | `{ fields }` | **Stable** |
 | Bare field | `id,` | **Stable** |
 | Renamed field | `order_id: id` | **Stable** |
 | Double-quoted key | `"order id": id` | **Stable** |
-| Auto-join | `FROM c->orders o` | **Needs review** |
+| Forward join (`->`) | `FROM c->orders o` | **Needs review** |
+| Reverse join (`<-`) | `FROM o<-customers c` | **Needs review** |
+| Join path chain | `FROM c->orders o->items i` | **Needs review** |
+| Bridge join | `FROM c->custacct<-accounts a` | **Needs review** |
 | Line comments | `// comment` | **Stable** |
 | Trailing commas | `{ id, name, }` | **Stable** |
 | SQL passthrough | `SELECT id FROM t` | **Stable** |
@@ -55,15 +61,19 @@ Snapshot as of v0.2.0.
 | Nested object select | `(SELECT json_group_array(json_object(...)))` | **Stable** |
 | Array select | `json_group_array(...)` | **Stable** |
 | Inline array | `json_array(...)` | **Stable** |
-| Auto-join FK convention | `<table>_id` column naming | **Needs review** |
+| Forward join | `FROM table WHERE table.parent_id = alias.parent_id` | **Needs review** |
+| Reverse join | `FROM table WHERE alias.table_id = table.table_id` | **Needs review** |
+| Join path chain | `FROM t1 JOIN t2 ON ... WHERE ...` | **Needs review** |
+| FK convention | `<table>_id` column naming | **Needs review** |
 
 ## Gaps and prerequisites
 
 Before 1.0:
 
-- **Auto-join syntax settling**: The `->` operator is new in v0.2.0. Needs
-  real-world usage to confirm the syntax and FK convention are right. The `ON`
-  override clause is planned but not yet implemented.
+- **Join path syntax settling**: The `->` and `<-` operators, chains, and bridge
+  patterns are new (v0.2.0–v0.3.0). Needs real-world usage to confirm the
+  syntax, FK convention, and rendering are right. The `ON` override clause is
+  planned but not yet implemented.
 - **Error messages**: Error text is not part of the stability contract, but
   should be consistently helpful before 1.0.
 - **Distribution story**: No install target, pkg-config, or CMake find-module.
