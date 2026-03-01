@@ -9,7 +9,7 @@ period exists to get the API and syntax right.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.2.0.
+Snapshot as of v0.3.0.
 
 ### C++ API (`sqldeep.h`)
 
@@ -25,9 +25,9 @@ Snapshot as of v0.2.0.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.2.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.3.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `2` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `3` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
