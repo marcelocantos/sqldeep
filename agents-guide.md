@@ -54,6 +54,9 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 | Nested deep select | `(SELECT json_group_array(json_object(...)) FROM ...)` |
 | `SELECT [expr] FROM ...` | `SELECT json_group_array(expr) FROM ...` |
 | `FROM ... SELECT [expr]` | same (FROM-first alternative) |
+| `SELECT/1 { fields } FROM ...` | `SELECT json_object(...) FROM ... LIMIT 1` (singular) |
+| `SELECT/1 [expr] FROM ...` | `SELECT expr FROM ... LIMIT 1` (singular) |
+| `FROM ... SELECT/1 { fields }` | same (FROM-first singular) |
 | `FROM ... SELECT expr` | `SELECT expr FROM ...` (plain rearrangement) |
 | `[expr, ...]` | `json_array(...)` |
 | `{ fields }` (inline) | `json_object(...)` |
@@ -132,6 +135,18 @@ FROM customers c SELECT {
     accounts: FROM c->custacct<-accounts a SELECT { acct_name },
 }
 ```
+
+### Singular select (one-to-one / many-to-one)
+
+```
+FROM orders o SELECT {
+    orders_id,
+    vendor: SELECT/1 { name } FROM o<-vendors v,
+}
+```
+
+Returns a single object (or null if no match) instead of an array. Use for
+relationships where you expect at most one result.
 
 ### Many-to-one (reverse join)
 

@@ -32,7 +32,8 @@ Pure `string → string` transformation. No SQLite dependency.
 
 2. **AST** — `SqlParts` (vector of string | DeepSelect | ObjectLiteral |
    ArrayLiteral | JoinPath) is the spine. Represents SQL-inside-JSON-inside-SQL
-   to arbitrary nesting depth.
+   to arbitrary nesting depth. `DeepSelect` has a `bool singular` flag for
+   `SELECT/1` (singular select).
 
 3. **Alias pre-scan** — before parsing, a lightweight lexer pass builds a global
    `alias → table name` map from FROM/JOIN clauses. This allows join path
@@ -42,16 +43,19 @@ Pure `string → string` transformation. No SQLite dependency.
 
 4. **Parser** — unified recursive descent. Scans SQL tokens, descending into
    deep construct parsing when `SELECT {`, `SELECT [`, `{`, or `[` is
-   encountered. Handles `(SELECT {/[)` subquery pattern specially to avoid
-   double-wrapping parens. Tracks paren depth and string literals to
-   distinguish structural commas from expression-internal commas. Detects
+   encountered. `try_consume_singular()` detects the `/1` suffix after SELECT.
+   Handles `(SELECT {/[)` subquery pattern specially to avoid double-wrapping
+   parens. Tracks paren depth and string literals to distinguish structural
+   commas from expression-internal commas. Detects
    `ident (-> | <-) table [alias] ...` join path patterns and emits `JoinPath`
    AST nodes supporting arbitrary chains.
 
 5. **Renderer** — walks AST, emits standard SQL. Object literals become
    `json_object(...)`, array literals become `json_array(...)`, deep selects
    at top level emit `SELECT json_object/json_group_array(...)`, nested deep
-   selects wrap in `(SELECT json_group_array(...))`. Join paths emit
+   selects wrap in `(SELECT json_group_array(...))`. Singular selects
+   (`SELECT/1`) skip `json_group_array` wrapping and append `LIMIT 1`.
+   Join paths emit
    `FROM step1_table [JOIN step2 ON ...] WHERE step1.start_table_id = start.start_table_id`.
 
 ### Syntax
@@ -62,6 +66,10 @@ Pure `string → string` transformation. No SQLite dependency.
 - Nested `FROM ... SELECT { ... }` → same output (FROM-first alternative)
 - `SELECT [expr] FROM ...` → `SELECT json_group_array(expr) FROM ...`
 - `FROM ... SELECT [expr]` → same output (FROM-first alternative)
+- `SELECT/1 { fields } FROM ...` → `SELECT json_object(...) FROM ... LIMIT 1` (singular: one row, no array wrapping)
+- `SELECT/1 [expr] FROM ...` → `SELECT expr FROM ... LIMIT 1` (singular array: single element unwrapped)
+- `FROM ... SELECT/1 { fields }` → same output (FROM-first alternative)
+- Nested `SELECT/1 { ... }` → `(SELECT json_object(...) FROM ... LIMIT 1)` (returns object or null)
 - `FROM ... SELECT expr` → `SELECT expr FROM ...` (plain rearrangement, no JSON wrapping)
 - `[expr, ...]` → `json_array(...)`
 - `{ fields }` → `json_object(...)` (inline)
@@ -96,14 +104,14 @@ mkfile              Build system (mk)
   mixed array/object nesting, comments, SQL passthrough, key escaping, nesting
   depth limits, auto-join (`->`), reverse join (`<-`), join path chains
   (grandchild, bridge/many-to-many, three-step), FROM-first variants (deep and
-  plain), error cases
+  plain), singular select (`SELECT/1`) variants, error cases
 
 - `test_sqlite.cpp` — integration tests: transpile sqldeep syntax, execute the
   resulting SQL against an in-memory SQLite database, and verify the JSON output.
   Covers single-table queries, two- and three-level nesting, mixed array/object
   nesting, empty subquery results, WHERE clauses, auto-join, reverse join,
-  grandchild chain, bridge join (many-to-many), FROM-first variants, and plain
-  SQL passthrough.
+  grandchild chain, bridge join (many-to-many), FROM-first variants, singular
+  select (`SELECT/1`), and plain SQL passthrough.
 
 Add new tests to `test_transpile.cpp` or create new `test_*.cpp` files for
 focused component testing.

@@ -101,6 +101,25 @@ SELECT {
 
 Nesting works to arbitrary depth.
 
+### Singular select (`SELECT/1`)
+
+Use `SELECT/1` for single-row projections. It skips `json_group_array()`
+wrapping and appends `LIMIT 1`, returning a single object (or null) instead of
+an array:
+
+```sql
+SELECT {
+    orders_id,
+    vendor: SELECT/1 { name } FROM o<-vendors v,
+} FROM orders o
+-- → SELECT json_object('orders_id', orders_id,
+--     'vendor', (SELECT json_object('name', name)
+--      FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1))
+--   FROM orders o
+```
+
+Works with both `{ }` and `[ ]`, in SELECT-first and FROM-first syntax.
+
 ### Join paths (`->` and `<-`)
 
 The `->` and `<-` operators generate JOIN/WHERE clauses from table relationships,
