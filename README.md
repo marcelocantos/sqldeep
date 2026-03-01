@@ -13,7 +13,7 @@ FROM customers c SELECT {
     customers_id, name,
     orders: FROM c->orders o ORDER BY orders_id SELECT {
         orders_id, total,
-        vendor: FROM o<-vendors v SELECT { vendor_name: v.name },
+        vendor: FROM o<-vendors v SELECT/1 { vendor_name: v.name },
     },
 }
 ```
@@ -23,8 +23,8 @@ FROM customers c SELECT {
 ```sql
 SELECT json_object('customers_id', customers_id, 'name', name, 'orders',
   (SELECT json_group_array(json_object('orders_id', orders_id, 'total', total, 'vendor',
-    (SELECT json_group_array(json_object('vendor_name', v.name))
-     FROM vendors v WHERE o.vendors_id = v.vendors_id)))
+    (SELECT json_object('vendor_name', v.name)
+     FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)))
    FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id))
 FROM customers c
 ```
