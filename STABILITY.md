@@ -16,6 +16,9 @@ Snapshot as of v0.3.0.
 | Item | Signature | Stability |
 |------|-----------|-----------|
 | `transpile` | `std::string sqldeep::transpile(const std::string& input)` | **Stable** |
+| `transpile` (FK) | `std::string sqldeep::transpile(const std::string& input, const std::vector<ForeignKey>& foreign_keys)` | **Needs review** |
+| `ForeignKey` | `struct sqldeep::ForeignKey { from_table, to_table, columns }` | **Needs review** |
+| `ForeignKey::ColumnPair` | `struct { from_column, to_column }` | **Needs review** |
 | `Error` | `class sqldeep::Error : public std::runtime_error` | **Stable** |
 | `Error::Error` | `Error(const std::string& msg, int line, int col)` | **Stable** |
 | `Error::line` | `int line() const` | **Stable** |
@@ -71,6 +74,8 @@ Snapshot as of v0.3.0.
 | Join path chain | `FROM t1 JOIN t2 ON ... WHERE ...` | **Needs review** |
 | Plain FROM-first select | `SELECT expr FROM ...` (rearranged, no JSON) | **Stable** |
 | FK convention | `<table>_id` column naming | **Needs review** |
+| FK-guided join | Uses explicit FK metadata (no convention fallback) | **Needs review** |
+| Multi-column FK | AND-joined conditions | **Needs review** |
 
 ## Gaps and prerequisites
 
@@ -82,6 +87,10 @@ Before 1.0:
   planned but not yet implemented.
 - **Singular select (`SELECT/1`)**: New in v0.4.0. The `/1` suffix is compact
   but unusual — needs usage feedback to confirm it's the right spelling.
+- **FK-guided joins**: New. The `ForeignKey` struct and FK-aware `transpile()`
+  overload need real-world usage to confirm the API shape is right. Ambiguous FK
+  disambiguation (multiple FKs between the same tables) is not yet supported in
+  the syntax — users must use explicit WHERE clauses for now.
 - **Error messages**: Error text is not part of the stability contract, but
   should be consistently helpful before 1.0.
 - **Distribution story**: No install target, pkg-config, or CMake find-module.
@@ -90,7 +99,8 @@ Before 1.0:
 
 ## Out of scope for 1.0
 
-- Schema-aware transpilation (accepting a `sqlite3*` handle for FK introspection)
+- Schema-aware transpilation (accepting a `sqlite3*` handle for automatic FK
+  introspection — FK metadata can already be passed manually via `ForeignKey`)
 - Multi-statement input (`;`-separated)
 - PostgreSQL / MySQL output targets
 - Aggregate functions beyond `json_group_array`

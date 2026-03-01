@@ -122,8 +122,10 @@ Works with both `{ }` and `[ ]`, in SELECT-first and FROM-first syntax.
 
 ### Join paths (`->` and `<-`)
 
-The `->` and `<-` operators generate JOIN/WHERE clauses from table relationships,
-following the convention that foreign keys are named `<table>_id`:
+The `->` and `<-` operators generate JOIN/WHERE clauses from table relationships.
+By default, they follow the convention that foreign keys are named `<table>_id`.
+When FK metadata is provided (see [FK-guided joins](#fk-guided-joins)), real
+column names are used instead.
 
 ```sql
 // One-to-many: customers → orders (orders has customers_id FK)
@@ -145,6 +147,25 @@ FROM c->custacct<-accounts a
 --   WHERE custacct.customers_id = c.customers_id
 ```
 
+### FK-guided joins
+
+Pass a `std::vector<sqldeep::ForeignKey>` to `transpile()` to resolve join
+paths from real FK metadata instead of the `<table>_id` convention. This
+supports non-conventional column names and multi-column foreign keys:
+
+```cpp
+std::vector<sqldeep::ForeignKey> fks = {
+    {"orders", "customers", {{"cust_id", "id"}}},           // single-column
+    {"sales", "regions", {{"region", "region"},              // multi-column
+                           {"shop", "shop"}}},
+};
+std::string sql = sqldeep::transpile(input, fks);
+```
+
+When FK metadata is provided, every join must be resolvable from it — there is
+no fallback to the naming convention. Missing or ambiguous FKs throw
+`sqldeep::Error`.
+
 ### Comments and trailing commas
 
 - `//` line comments are stripped
@@ -160,14 +181,24 @@ unchanged.
 ```cpp
 #include "sqldeep.h"
 
+// Convention-based (uses <table>_id for join paths):
 std::string sql = sqldeep::transpile(R"(
     SELECT { id, name } FROM users
 )");
-// sql == "SELECT json_object('id', id, 'name', name) FROM users"
+
+// FK-guided (uses explicit foreign key metadata):
+std::vector<sqldeep::ForeignKey> fks = {
+    {"orders", "customers", {{"cust_id", "id"}}},
+};
+std::string sql2 = sqldeep::transpile(R"(
+    FROM customers c SELECT { name,
+        orders: FROM c->orders o SELECT { total },
+    }
+)", fks);
 ```
 
-On parse errors, throws `sqldeep::Error` (subclass of `std::runtime_error`)
-with `line()` and `col()` accessors.
+On parse errors (or unresolvable joins in FK mode), throws `sqldeep::Error`
+(subclass of `std::runtime_error`) with `line()` and `col()` accessors.
 
 ## Building
 

@@ -57,6 +57,9 @@ Pure `string → string` transformation. No SQLite dependency.
    (`SELECT/1`) skip `json_group_array` wrapping and append `LIMIT 1`.
    Join paths emit
    `FROM step1_table [JOIN step2 ON ...] WHERE step1.start_table_id = start.start_table_id`.
+   Column names come from explicit FK metadata when provided, or
+   the `<table>_id` convention otherwise. Multi-column FKs produce
+   AND-joined conditions.
 
 ### Syntax
 
@@ -83,13 +86,17 @@ Pure `string → string` transformation. No SQLite dependency.
 - Chain: `FROM c->orders o->items i` → `FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id`
 - Bridge (many-to-many): `FROM c->custacct<-accounts a` → `FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id`
 - Convention: PK = `<table>_id`, FK = same column name in child/parent table
+  (default when no FK metadata provided)
+- FK-guided mode: `transpile(input, foreign_keys)` uses explicit FK metadata
+  instead of the naming convention. Supports multi-column FKs. Errors on
+  missing or ambiguous FK matches (no convention fallback).
 - `//` line comments stripped
 - Trailing commas allowed
 
 ## File layout
 
 ```
-sqldeep.h           Public header (Error class, transpile())
+sqldeep.h           Public header (Error, ForeignKey, transpile())
 sqldeep.cpp         Implementation (lexer, AST, parser, renderer)
 tests/              doctest test files
 examples/           demo.cpp
@@ -104,14 +111,16 @@ mkfile              Build system (mk)
   mixed array/object nesting, comments, SQL passthrough, key escaping, nesting
   depth limits, auto-join (`->`), reverse join (`<-`), join path chains
   (grandchild, bridge/many-to-many, three-step), FROM-first variants (deep and
-  plain), singular select (`SELECT/1`) variants, error cases
+  plain), singular select (`SELECT/1`) variants, FK-guided joins (forward,
+  reverse, chain, bridge, multi-column, error cases)
 
 - `test_sqlite.cpp` — integration tests: transpile sqldeep syntax, execute the
   resulting SQL against an in-memory SQLite database, and verify the JSON output.
   Covers single-table queries, two- and three-level nesting, mixed array/object
   nesting, empty subquery results, WHERE clauses, auto-join, reverse join,
   grandchild chain, bridge join (many-to-many), FROM-first variants, singular
-  select (`SELECT/1`), and plain SQL passthrough.
+  select (`SELECT/1`), FK-guided joins (single and multi-column), and plain
+  SQL passthrough.
 
 Add new tests to `test_transpile.cpp` or create new `test_*.cpp` files for
 focused component testing.

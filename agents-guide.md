@@ -14,10 +14,14 @@ sqldeep itself.
 ```cpp
 #include "sqldeep.h"
 
-// Transpile sqldeep syntax to standard SQL.
-// Returns the transpiled SQL string.
-// Throws sqldeep::Error on parse failure.
+// Convention-based (uses <table>_id for join paths):
 std::string sql = sqldeep::transpile(input);
+
+// FK-guided (uses explicit foreign key metadata, no convention fallback):
+std::vector<sqldeep::ForeignKey> fks = {
+    {"orders", "customers", {{"cust_id", "id"}}},
+};
+std::string sql2 = sqldeep::transpile(input, fks);
 ```
 
 ### Error handling
@@ -74,7 +78,8 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
   - `<-` (many-to-one): `FROM o<-customers c` → `FROM customers c WHERE o.customers_id = c.customers_id`
   - Chains: `FROM c->orders o->items i` → `FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id`
   - Bridge (many-to-many): `FROM c->custacct<-accounts a` → `FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id`
-  - Convention: PK = `<table>_id`, FK = same column name in child/parent table.
+  - Convention mode (default): PK = `<table>_id`, FK = same column name in child/parent table.
+  - FK-guided mode: pass `std::vector<sqldeep::ForeignKey>` to `transpile()`. Supports multi-column FKs. Errors on missing/ambiguous FK (no convention fallback).
 - `//` line comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }` or `[ ]` passes through unchanged.
@@ -97,6 +102,9 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - **Subquery wrapping.** `(SELECT { ... })`, `(FROM ... SELECT { ... })`, and
   `(FROM ... SELECT expr)` in parentheses are recognised specially — sqldeep
   avoids double-wrapping with extra parens.
+- **FK-guided mode is strict.** When `foreign_keys` is provided, every join
+  must be resolvable from it — no fallback to the `<table>_id` convention.
+  Multiple FKs between the same table pair cause an ambiguity error.
 
 ## Common patterns
 
@@ -170,6 +178,21 @@ FROM customers c SELECT {
 
 ```
 FROM items SELECT { tags: [1, 'two', 3] }
+```
+
+### FK-guided join (non-conventional column names)
+
+```cpp
+std::vector<sqldeep::ForeignKey> fks = {
+    {"orders", "customers", {{"cust_id", "id"}}},
+};
+auto sql = sqldeep::transpile(R"(
+    FROM customers c SELECT {
+        name,
+        orders: FROM c->orders o SELECT { total },
+    }
+)", fks);
+// → o.cust_id = c.id (instead of o.customers_id = c.customers_id)
 ```
 
 ### SELECT-first (also supported)
