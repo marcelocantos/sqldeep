@@ -349,6 +349,93 @@ TEST_CASE("sqlite: three-level auto-join") {
         R"({"customers_id":1,"name":"alice","orders":[{"orders_id":10,"items":[{"name":"widget","qty":3},{"name":"gadget","qty":1}]}]})");
 }
 
+// ── FROM-first syntax ───────────────────────────────────────────────
+
+TEST_CASE("sqlite: from-first basic") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'alice')");
+    exec(g.db, "INSERT INTO t VALUES(2, 'bob')");
+
+    auto rows = transpile_and_query(g.db,
+        "FROM t ORDER BY id SELECT { id, name }");
+
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0] == R"({"id":1,"name":"alice"})");
+    CHECK(rows[1] == R"({"id":2,"name":"bob"})");
+}
+
+TEST_CASE("sqlite: from-first nested") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(id INTEGER PRIMARY KEY, cid INTEGER, total REAL);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO orders VALUES(10, 1, 99.5);
+        INSERT INTO orders VALUES(11, 1, 42.0);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM customers c SELECT {
+            id, name,
+            orders: FROM orders o WHERE o.cid = c.id ORDER BY o.id SELECT { order_id: id, total },
+        }
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] ==
+        R"({"id":1,"name":"alice","orders":[{"order_id":10,"total":99.5},{"order_id":11,"total":42.0}]})");
+}
+
+TEST_CASE("sqlite: from-first with auto-join") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER, total REAL);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO orders VALUES(10, 1, 99.5);
+        INSERT INTO orders VALUES(11, 1, 42.0);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM customers c SELECT {
+            customers_id, name,
+            orders: FROM c->orders ORDER BY orders_id SELECT { orders_id, total },
+        }
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] ==
+        R"({"customers_id":1,"name":"alice","orders":[{"orders_id":10,"total":99.5},{"orders_id":11,"total":42.0}]})");
+}
+
+TEST_CASE("sqlite: from-first three-level") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER);
+        CREATE TABLE items(items_id INTEGER PRIMARY KEY, orders_id INTEGER, name TEXT, qty INTEGER);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO orders VALUES(10, 1);
+        INSERT INTO items VALUES(100, 10, 'widget', 3);
+        INSERT INTO items VALUES(101, 10, 'gadget', 1);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM customers c SELECT {
+            customers_id, name,
+            orders: FROM c->orders o ORDER BY orders_id SELECT {
+                orders_id,
+                items: FROM o->items ORDER BY items_id SELECT { name, qty },
+            },
+        }
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] ==
+        R"({"customers_id":1,"name":"alice","orders":[{"orders_id":10,"items":[{"name":"widget","qty":3},{"name":"gadget","qty":1}]}]})");
+}
+
 // ── SQL passthrough ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: plain SQL passthrough") {

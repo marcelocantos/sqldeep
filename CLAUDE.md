@@ -55,8 +55,11 @@ Pure `string → string` transformation. No SQLite dependency.
 ### Syntax
 
 - `SELECT { fields } FROM ...` → `SELECT json_object(...) FROM ...`
+- `FROM ... SELECT { fields }` → same output (FROM-first alternative)
 - Nested `SELECT { ... } FROM ...` → `(SELECT json_group_array(json_object(...)) FROM ...)`
+- Nested `FROM ... SELECT { ... }` → same output (FROM-first alternative)
 - `SELECT [expr] FROM ...` → `SELECT json_group_array(expr) FROM ...`
+- `FROM ... SELECT [expr]` → same output (FROM-first alternative)
 - `[expr, ...]` → `json_array(...)`
 - `{ fields }` → `json_object(...)` (inline)
 - Bare field: `id,` → `'id', id`

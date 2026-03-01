@@ -332,3 +332,107 @@ TEST_CASE("auto-join coexists with explicit WHERE") {
         "FROM notes WHERE notes.customers_id = c.customers_id)"
         ") FROM customers c");
 }
+
+// ── FROM-first syntax ──────────────────────────────────────────────
+
+TEST_CASE("from-first basic") {
+    CHECK(transpile("FROM t SELECT { id, name }") ==
+          "SELECT json_object('id', id, 'name', name) FROM t");
+}
+
+TEST_CASE("from-first with WHERE") {
+    CHECK(transpile("FROM t WHERE x > 0 SELECT { id }") ==
+          "SELECT json_object('id', id) FROM t WHERE x > 0");
+}
+
+TEST_CASE("from-first with ORDER BY") {
+    CHECK(transpile("FROM t ORDER BY id SELECT { id, name }") ==
+          "SELECT json_object('id', id, 'name', name) FROM t ORDER BY id");
+}
+
+TEST_CASE("from-first with trailing comma") {
+    CHECK(transpile("FROM t SELECT { id, name, }") ==
+          "SELECT json_object('id', id, 'name', name) FROM t");
+}
+
+TEST_CASE("from-first with comment") {
+    CHECK(transpile("// query\nFROM t SELECT { id }") ==
+          "SELECT json_object('id', id) FROM t");
+}
+
+TEST_CASE("from-first array projection") {
+    CHECK(transpile("FROM orders WHERE cid = 1 SELECT [total]") ==
+          "SELECT json_group_array(total) FROM orders WHERE cid = 1");
+}
+
+TEST_CASE("from-first nested in field value") {
+    CHECK(transpile(
+        "FROM customers c SELECT { id, name, "
+        "orders: FROM orders o WHERE o.cid = c.id SELECT { total } }") ==
+        "SELECT json_object('id', id, 'name', name, 'orders', "
+        "(SELECT json_group_array(json_object('total', total)) "
+        "FROM orders o WHERE o.cid = c.id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("from-first with auto-join") {
+    CHECK(transpile(
+        "FROM customers c SELECT { customers_id, name, "
+        "orders: FROM c->orders SELECT { orders_id } }") ==
+        "SELECT json_object('customers_id', customers_id, 'name', name, "
+        "'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) "
+        "FROM orders WHERE orders.customers_id = c.customers_id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("from-first three-level nesting") {
+    auto input = R"(FROM customers c SELECT {
+    customers_id, name,
+    orders: FROM c->orders o ORDER BY orders_id SELECT {
+        orders_id,
+        items: FROM o->items ORDER BY items_id SELECT { name, qty },
+    },
+})";
+
+    auto expected =
+        "SELECT json_object('customers_id', customers_id, 'name', name, 'orders', "
+        "(SELECT json_group_array(json_object('orders_id', orders_id, 'items', "
+        "(SELECT json_group_array(json_object('name', name, 'qty', qty)) "
+        "FROM items WHERE items.orders_id = o.orders_id ORDER BY items_id)"
+        ")) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)"
+        ") FROM customers c";
+
+    CHECK(transpile(input) == expected);
+}
+
+TEST_CASE("from-first in parenthesised subquery") {
+    CHECK(transpile(
+        "SELECT { id } FROM t WHERE x IN (FROM t2 SELECT { y })") ==
+        "SELECT json_object('id', id) FROM t WHERE x IN "
+        "(SELECT json_group_array(json_object('y', y)) FROM t2)");
+}
+
+TEST_CASE("mixed from-first and select-first") {
+    CHECK(transpile(
+        "FROM customers c SELECT { id, "
+        "orders: SELECT { total } FROM orders WHERE cid = c.id }") ==
+        "SELECT json_object('id', id, 'orders', "
+        "(SELECT json_group_array(json_object('total', total)) "
+        "FROM orders WHERE cid = c.id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("from-first renamed field") {
+    CHECK(transpile("FROM t SELECT { order_id: id }") ==
+          "SELECT json_object('order_id', id) FROM t");
+}
+
+TEST_CASE("from-first with inline array") {
+    CHECK(transpile("FROM t SELECT { id, tags: [1, 2, 3] }") ==
+          "SELECT json_object('id', id, 'tags', json_array(1, 2, 3)) FROM t");
+}
+
+TEST_CASE("plain FROM still passes through") {
+    CHECK(transpile("SELECT id, name FROM t WHERE x > 0") ==
+          "SELECT id, name FROM t WHERE x > 0");
+}
