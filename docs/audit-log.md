@@ -19,5 +19,5 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-03-01 — /release v0.3.0
 
-- **Commit**: `working tree dirty`
+- **Commit**: `18cccc4`
 - **Outcome**: Released v0.3.0. Added reverse join (`<-`), join path chains, bridge joins, FROM-first syntax for deep and plain selects, GitHub Actions CI (Linux + macOS). All 94 tests pass (39 new since v0.2.0).
