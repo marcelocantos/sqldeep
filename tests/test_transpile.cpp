@@ -436,3 +436,105 @@ TEST_CASE("plain FROM still passes through") {
     CHECK(transpile("SELECT id, name FROM t WHERE x > 0") ==
           "SELECT id, name FROM t WHERE x > 0");
 }
+
+// ── Reverse join (<- syntax) ────────────────────────────────────────
+
+TEST_CASE("single reverse join") {
+    CHECK(transpile(
+        "SELECT { orders_id, "
+        "customer: SELECT { name } FROM o<-customers c "
+        "} FROM orders o") ==
+        "SELECT json_object('orders_id', orders_id, "
+        "'customer', (SELECT json_group_array(json_object('name', name)) "
+        "FROM customers c WHERE o.customers_id = c.customers_id)"
+        ") FROM orders o");
+}
+
+TEST_CASE("reverse join without alias") {
+    CHECK(transpile(
+        "SELECT { orders_id, "
+        "customer: SELECT { name } FROM o<-customers "
+        "} FROM orders o") ==
+        "SELECT json_object('orders_id', orders_id, "
+        "'customer', (SELECT json_group_array(json_object('name', name)) "
+        "FROM customers WHERE o.customers_id = customers.customers_id)"
+        ") FROM orders o");
+}
+
+// ── Join path chains ────────────────────────────────────────────────
+
+TEST_CASE("bridge join (many-to-many)") {
+    CHECK(transpile(
+        "SELECT { customers_id, "
+        "accounts: SELECT { acct_id } FROM c->custacct<-accounts a "
+        "} FROM customers c") ==
+        "SELECT json_object('customers_id', customers_id, "
+        "'accounts', (SELECT json_group_array(json_object('acct_id', acct_id)) "
+        "FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id "
+        "WHERE custacct.customers_id = c.customers_id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("bridge join with junction alias") {
+    CHECK(transpile(
+        "SELECT { customers_id, "
+        "accounts: SELECT { acct_id } FROM c->custacct ca<-accounts a "
+        "} FROM customers c") ==
+        "SELECT json_object('customers_id', customers_id, "
+        "'accounts', (SELECT json_group_array(json_object('acct_id', acct_id)) "
+        "FROM custacct ca JOIN accounts a ON ca.accounts_id = a.accounts_id "
+        "WHERE ca.customers_id = c.customers_id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("bridge join with FROM-first syntax") {
+    CHECK(transpile(
+        "FROM customers c SELECT { customers_id, "
+        "accounts: FROM c->custacct<-accounts a SELECT { acct_id } }") ==
+        "SELECT json_object('customers_id', customers_id, "
+        "'accounts', (SELECT json_group_array(json_object('acct_id', acct_id)) "
+        "FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id "
+        "WHERE custacct.customers_id = c.customers_id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("grandchild chain") {
+    CHECK(transpile(
+        "SELECT { customers_id, "
+        "items: SELECT { items_id } FROM c->orders->items "
+        "} FROM customers c") ==
+        "SELECT json_object('customers_id', customers_id, "
+        "'items', (SELECT json_group_array(json_object('items_id', items_id)) "
+        "FROM orders JOIN items ON items.orders_id = orders.orders_id "
+        "WHERE orders.customers_id = c.customers_id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("grandchild chain with aliases") {
+    CHECK(transpile(
+        "SELECT { customers_id, "
+        "items: SELECT { items_id } FROM c->orders o->items i "
+        "} FROM customers c") ==
+        "SELECT json_object('customers_id', customers_id, "
+        "'items', (SELECT json_group_array(json_object('items_id', items_id)) "
+        "FROM orders o JOIN items i ON i.orders_id = o.orders_id "
+        "WHERE o.customers_id = c.customers_id)"
+        ") FROM customers c");
+}
+
+TEST_CASE("three-step chain") {
+    CHECK(transpile(
+        "SELECT { a_id, "
+        "ds: SELECT { d_id } FROM a->b->c->d "
+        "} FROM alpha a") ==
+        "SELECT json_object('a_id', a_id, "
+        "'ds', (SELECT json_group_array(json_object('d_id', d_id)) "
+        "FROM b JOIN c ON c.b_id = b.b_id JOIN d ON d.c_id = c.c_id "
+        "WHERE b.alpha_id = a.alpha_id)"
+        ") FROM alpha a");
+}
+
+TEST_CASE("missing table after arrow throws") {
+    CHECK_THROWS_AS(transpile(
+        "SELECT { id } FROM c-> } FROM customers c"), Error);
+}

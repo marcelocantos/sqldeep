@@ -87,7 +87,7 @@ public:
         advance();
         if (pos_ < src_.size()) {
             char n = src_[pos_];
-            if ((c == '<' && (n == '=' || n == '>')) ||
+            if ((c == '<' && (n == '=' || n == '>' || n == '-')) ||
                 (c == '>' && n == '=') ||
                 (c == '!' && n == '=') ||
                 (c == '|' && n == '|') ||
@@ -218,14 +218,14 @@ private:
 struct DeepSelect;
 struct ObjectLiteral;
 struct ArrayLiteral;
-struct AutoJoin;
+struct JoinPath;
 
 using SqlPart = std::variant<
     std::string,
     std::unique_ptr<DeepSelect>,
     std::unique_ptr<ObjectLiteral>,
     std::unique_ptr<ArrayLiteral>,
-    std::unique_ptr<AutoJoin>
+    std::unique_ptr<JoinPath>
 >;
 using SqlParts = std::vector<SqlPart>;
 
@@ -241,11 +241,15 @@ struct ArrayLiteral {
     std::vector<SqlParts> elements;
 };
 
-struct AutoJoin {
-    std::string parent_alias;  // e.g. "c"
-    std::string parent_table;  // e.g. "customers"
-    std::string child_table;   // e.g. "orders"
-    std::string child_alias;   // e.g. "o" (empty if none)
+struct JoinPath {
+    struct Step {
+        bool forward;       // true = ->, false = <-
+        std::string table;
+        std::string alias;  // empty if none
+    };
+    std::string start_alias;  // e.g. "c"
+    std::string start_table;  // e.g. "customers" (resolved from alias_map)
+    std::vector<Step> steps;
 };
 
 struct DeepSelect {
@@ -318,16 +322,23 @@ build_alias_map(const std::string& input) {
 
         Token second = lex.peek();
 
-        // Pattern: ident -> ident [alias]
-        if (second.type == TokenType::Other && second.text == "->") {
-            lex.next(); // consume ->
-            Token child = lex.peek();
-            if (child.type != TokenType::Ident) continue;
-            lex.next(); // consume child table
-            Token alias = lex.peek();
-            if (alias.type == TokenType::Ident && !is_sql_keyword(alias.text)) {
-                lex.next();
-                map[alias.text] = child.text;
+        // Pattern: ident (-> | <-) table [alias] [(-> | <-) table [alias] ...]
+        if (second.type == TokenType::Other &&
+            (second.text == "->" || second.text == "<-")) {
+            while (true) {
+                Token arrow = lex.peek();
+                if (arrow.type != TokenType::Other ||
+                    (arrow.text != "->" && arrow.text != "<-"))
+                    break;
+                lex.next(); // consume arrow
+                Token table = lex.peek();
+                if (table.type != TokenType::Ident) break;
+                lex.next(); // consume table
+                Token alias = lex.peek();
+                if (alias.type == TokenType::Ident && !is_sql_keyword(alias.text)) {
+                    lex.next();
+                    map[alias.text] = table.text;
+                }
             }
             continue;
         }
@@ -645,38 +656,48 @@ private:
                 --paren_depth;
             }
 
-            // Check for ident -> ident (auto-join)
+            // Check for ident (-> | <-) ... (join path)
             if (t.type == TokenType::Ident && paren_depth == 0) {
                 auto st = lex_.save();
                 Token alias_tok = lex_.next(); // consume ident
                 Token arrow = lex_.peek();
-                if (arrow.type == TokenType::Other && arrow.text == "->") {
-                    lex_.next(); // consume ->
-                    Token child = lex_.peek();
-                    if (child.type == TokenType::Ident) {
-                        lex_.next(); // consume child table
-                        auto it = alias_map_.find(alias_tok.text);
-                        if (it == alias_map_.end())
-                            lex_.error("unknown table alias '" +
-                                       alias_tok.text + "'",
-                                       alias_tok.line, alias_tok.col);
-                        auto aj = std::make_unique<AutoJoin>();
-                        aj->parent_alias = alias_tok.text;
-                        aj->parent_table = it->second;
-                        aj->child_table = child.text;
-                        // Optional child alias
+                if (arrow.type == TokenType::Other &&
+                    (arrow.text == "->" || arrow.text == "<-")) {
+                    auto it = alias_map_.find(alias_tok.text);
+                    if (it == alias_map_.end())
+                        lex_.error("unknown table alias '" +
+                                   alias_tok.text + "'",
+                                   alias_tok.line, alias_tok.col);
+                    auto jp = std::make_unique<JoinPath>();
+                    jp->start_alias = alias_tok.text;
+                    jp->start_table = it->second;
+                    while (true) {
+                        Token arr = lex_.peek();
+                        if (arr.type != TokenType::Other ||
+                            (arr.text != "->" && arr.text != "<-"))
+                            break;
+                        lex_.next(); // consume arrow
+                        bool forward = (arr.text == "->");
+                        Token table_tok = lex_.peek();
+                        if (table_tok.type != TokenType::Ident)
+                            lex_.error("expected table name after '" +
+                                       arr.text + "'",
+                                       arr.line, arr.col);
+                        lex_.next(); // consume table
+                        std::string alias;
                         Token next = lex_.peek();
                         if (next.type == TokenType::Ident &&
                             !is_sql_keyword(next.text)) {
-                            lex_.next();
-                            aj->child_alias = next.text;
+                            lex_.next(); // consume alias
+                            alias = next.text;
                         }
-                        flush_before(alias_tok);
-                        parts.push_back(std::move(aj));
-                        last_end = lex_.offset();
-                        need_space = true;
-                        continue;
+                        jp->steps.push_back({forward, table_tok.text, alias});
                     }
+                    flush_before(alias_tok);
+                    parts.push_back(std::move(jp));
+                    last_end = lex_.offset();
+                    need_space = true;
+                    continue;
                 }
                 lex_.restore(st);
             }
@@ -852,8 +873,8 @@ private:
                     render_object(*v, out);
                 } else if constexpr (std::is_same_v<T, std::unique_ptr<ArrayLiteral>>) {
                     render_array(*v, out);
-                } else if constexpr (std::is_same_v<T, std::unique_ptr<AutoJoin>>) {
-                    render_auto_join(*v, out);
+                } else if constexpr (std::is_same_v<T, std::unique_ptr<JoinPath>>) {
+                    render_join_path(*v, out);
                 }
             }, part);
         }
@@ -918,23 +939,51 @@ private:
         out += ")";
     }
 
-    void render_auto_join(const AutoJoin& aj, std::string& out) {
-        out += aj.child_table;
-        const auto& child_ref =
-            aj.child_alias.empty() ? aj.child_table : aj.child_alias;
-        if (!aj.child_alias.empty()) {
+    void render_join_path(const JoinPath& jp, std::string& out) {
+        // Step 1: FROM target
+        const auto& s1 = jp.steps[0];
+        out += s1.table;
+        const auto& s1_ref = s1.alias.empty() ? s1.table : s1.alias;
+        if (!s1.alias.empty()) {
             out += " ";
-            out += aj.child_alias;
+            out += s1.alias;
         }
+
+        // Steps 2+: JOINs
+        std::string prev_table = s1.table;
+        std::string prev_ref = s1_ref;
+        for (size_t i = 1; i < jp.steps.size(); ++i) {
+            const auto& step = jp.steps[i];
+            const auto& step_ref = step.alias.empty() ? step.table : step.alias;
+            out += " JOIN ";
+            out += step.table;
+            if (!step.alias.empty()) {
+                out += " ";
+                out += step.alias;
+            }
+            out += " ON ";
+            if (step.forward) {
+                // curr is child of prev
+                out += step_ref + "." + prev_table + "_id = " +
+                       prev_ref + "." + prev_table + "_id";
+            } else {
+                // prev is child of curr
+                out += prev_ref + "." + step.table + "_id = " +
+                       step_ref + "." + step.table + "_id";
+            }
+            prev_table = step.table;
+            prev_ref = step_ref;
+        }
+
+        // WHERE: correlate step 1 to start alias
         out += " WHERE ";
-        out += child_ref;
-        out += ".";
-        out += aj.parent_table;
-        out += "_id = ";
-        out += aj.parent_alias;
-        out += ".";
-        out += aj.parent_table;
-        out += "_id";
+        if (s1.forward) {
+            out += s1_ref + "." + jp.start_table + "_id = " +
+                   jp.start_alias + "." + jp.start_table + "_id";
+        } else {
+            out += jp.start_alias + "." + s1.table + "_id = " +
+                   s1_ref + "." + s1.table + "_id";
+        }
     }
 };
 

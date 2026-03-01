@@ -65,9 +65,12 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 | Renamed | `order_id: id` | `'order_id', id` |
 | Quoted key | `"order id": id` | `'order id', id` |
 
-- Auto-join: `FROM c->orders o` expands to
-  `FROM orders o WHERE o.customers_id = c.customers_id`
-  (convention: PK = `<table>_id`, FK = same column name in child table).
+- Join paths:
+  - `->` (one-to-many): `FROM c->orders o` → `FROM orders o WHERE o.customers_id = c.customers_id`
+  - `<-` (many-to-one): `FROM o<-customers c` → `FROM customers c WHERE o.customers_id = c.customers_id`
+  - Chains: `FROM c->orders o->items i` → `FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id`
+  - Bridge (many-to-many): `FROM c->custacct<-accounts a` → `FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id`
+  - Convention: PK = `<table>_id`, FK = same column name in child/parent table.
 - `//` line comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }` or `[ ]` passes through unchanged.
@@ -108,6 +111,33 @@ FROM customers c SELECT {
         orders_id,
         items: FROM o->items ORDER BY items_id SELECT { name, qty },
     },
+}
+```
+
+### Grandchild chain (one-to-many-to-many)
+
+```
+FROM customers c SELECT {
+    customers_id, name,
+    items: FROM c->orders o->items i SELECT { items_id, name },
+}
+```
+
+### Many-to-many via bridge table
+
+```
+FROM customers c SELECT {
+    customers_id, name,
+    accounts: FROM c->custacct<-accounts a SELECT { acct_name },
+}
+```
+
+### Many-to-one (reverse join)
+
+```
+FROM orders o SELECT {
+    orders_id,
+    customer: FROM o<-customers c SELECT { name },
 }
 ```
 
