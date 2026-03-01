@@ -31,26 +31,28 @@ Pure `string → string` transformation. No SQLite dependency.
    strings (JSON-style keys), identifiers, numbers, operators.
 
 2. **AST** — `SqlParts` (vector of string | DeepSelect | ObjectLiteral |
-   ArrayLiteral | AutoJoin) is the spine. Represents SQL-inside-JSON-inside-SQL
+   ArrayLiteral | JoinPath) is the spine. Represents SQL-inside-JSON-inside-SQL
    to arbitrary nesting depth.
 
 3. **Alias pre-scan** — before parsing, a lightweight lexer pass builds a global
-   `alias → table name` map from FROM/JOIN clauses. This allows `->` auto-join
+   `alias → table name` map from FROM/JOIN clauses. This allows join path
    resolution even when the alias definition appears later in the source
    (SQL defines aliases in FROM, which comes after the SELECT projection).
+   Handles both `->` and `<-` arrows, and chains of arbitrary length.
 
 4. **Parser** — unified recursive descent. Scans SQL tokens, descending into
    deep construct parsing when `SELECT {`, `SELECT [`, `{`, or `[` is
    encountered. Handles `(SELECT {/[)` subquery pattern specially to avoid
    double-wrapping parens. Tracks paren depth and string literals to
    distinguish structural commas from expression-internal commas. Detects
-   `ident->ident` auto-join patterns and emits `AutoJoin` AST nodes.
+   `ident (-> | <-) table [alias] ...` join path patterns and emits `JoinPath`
+   AST nodes supporting arbitrary chains.
 
 5. **Renderer** — walks AST, emits standard SQL. Object literals become
    `json_object(...)`, array literals become `json_array(...)`, deep selects
    at top level emit `SELECT json_object/json_group_array(...)`, nested deep
-   selects wrap in `(SELECT json_group_array(...))`, auto-joins emit
-   `FROM child WHERE child.parent_id = alias.parent_id`.
+   selects wrap in `(SELECT json_group_array(...))`. Join paths emit
+   `FROM step1_table [JOIN step2 ON ...] WHERE step1.start_table_id = start.start_table_id`.
 
 ### Syntax
 
@@ -65,8 +67,13 @@ Pure `string → string` transformation. No SQLite dependency.
 - Bare field: `id,` → `'id', id`
 - Renamed: `order_id: id` → `'order_id', id`
 - Double-quoted key: `"order id": id` → `'order id', id`
-- Auto-join: `FROM c->orders o` → `FROM orders o WHERE o.customers_id = c.customers_id`
-  (convention: PK = `<table>_id`, FK = same column name in child table)
+- Forward join: `FROM c->orders o` → `FROM orders o WHERE o.customers_id = c.customers_id`
+  (`->` = right table is child, has FK `<left_table>_id`)
+- Reverse join: `FROM o<-customers c` → `FROM customers c WHERE o.customers_id = c.customers_id`
+  (`<-` = left table is child, has FK `<right_table>_id`)
+- Chain: `FROM c->orders o->items i` → `FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id`
+- Bridge (many-to-many): `FROM c->custacct<-accounts a` → `FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id`
+- Convention: PK = `<table>_id`, FK = same column name in child/parent table
 - `//` line comments stripped
 - Trailing commas allowed
 
@@ -86,12 +93,15 @@ mkfile              Build system (mk)
 - `test_transpile.cpp` — end-to-end transpilation: basic objects, renamed
   fields, trailing commas, inline arrays, nested subqueries (2- and 3-level),
   mixed array/object nesting, comments, SQL passthrough, key escaping, nesting
-  depth limits, error cases
+  depth limits, auto-join (`->`), reverse join (`<-`), join path chains
+  (grandchild, bridge/many-to-many, three-step), FROM-first variants, error cases
 
 - `test_sqlite.cpp` — integration tests: transpile sqldeep syntax, execute the
   resulting SQL against an in-memory SQLite database, and verify the JSON output.
   Covers single-table queries, two- and three-level nesting, mixed array/object
-  nesting, empty subquery results, WHERE clauses, and plain SQL passthrough.
+  nesting, empty subquery results, WHERE clauses, auto-join, reverse join,
+  grandchild chain, bridge join (many-to-many), FROM-first variants, and plain
+  SQL passthrough.
 
 Add new tests to `test_transpile.cpp` or create new `test_*.cpp` files for
 focused component testing.

@@ -436,6 +436,125 @@ TEST_CASE("sqlite: from-first three-level") {
         R"({"customers_id":1,"name":"alice","orders":[{"orders_id":10,"items":[{"name":"widget","qty":3},{"name":"gadget","qty":1}]}]})");
 }
 
+// ── Reverse join (<- syntax) ────────────────────────────────────────
+
+TEST_CASE("sqlite: reverse join (many-to-one)") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER, total REAL);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO customers VALUES(2, 'bob');
+        INSERT INTO orders VALUES(10, 1, 99.5);
+        INSERT INTO orders VALUES(11, 2, 42.0);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            orders_id, total,
+            customer: SELECT { name }
+                      FROM o<-customers c,
+        } FROM orders o ORDER BY orders_id
+    )");
+
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0] ==
+        R"({"orders_id":10,"total":99.5,"customer":[{"name":"alice"}]})");
+    CHECK(rows[1] ==
+        R"({"orders_id":11,"total":42.0,"customer":[{"name":"bob"}]})");
+}
+
+// ── Grandchild chain (-> -> ) ───────────────────────────────────────
+
+TEST_CASE("sqlite: grandchild chain") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER);
+        CREATE TABLE items(items_id INTEGER PRIMARY KEY, orders_id INTEGER, name TEXT);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO orders VALUES(10, 1);
+        INSERT INTO orders VALUES(11, 1);
+        INSERT INTO items VALUES(100, 10, 'widget');
+        INSERT INTO items VALUES(101, 10, 'gadget');
+        INSERT INTO items VALUES(102, 11, 'doohickey');
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            customers_id, name,
+            items: SELECT { items_id, name }
+                   FROM c->orders o->items i,
+        } FROM customers c
+    )");
+
+    REQUIRE(rows.size() == 1);
+    // Verify all three items appear (ordering depends on SQLite JOIN traversal)
+    auto& r = rows[0];
+    CHECK(r.find("\"customers_id\":1") != std::string::npos);
+    CHECK(r.find("\"name\":\"alice\"") != std::string::npos);
+    CHECK(r.find("\"name\":\"widget\"") != std::string::npos);
+    CHECK(r.find("\"name\":\"gadget\"") != std::string::npos);
+    CHECK(r.find("\"name\":\"doohickey\"") != std::string::npos);
+}
+
+// ── Bridge join (many-to-many) ──────────────────────────────────────
+
+TEST_CASE("sqlite: bridge join (many-to-many)") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE custacct(custacct_id INTEGER PRIMARY KEY,
+                              customers_id INTEGER, accounts_id INTEGER);
+        CREATE TABLE accounts(accounts_id INTEGER PRIMARY KEY, acct_name TEXT);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO accounts VALUES(100, 'savings');
+        INSERT INTO accounts VALUES(101, 'checking');
+        INSERT INTO custacct VALUES(1, 1, 100);
+        INSERT INTO custacct VALUES(2, 1, 101);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT {
+            customers_id, name,
+            accounts: SELECT { acct_name }
+                      FROM c->custacct<-accounts a
+                      ORDER BY a.accounts_id,
+        } FROM customers c
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] ==
+        R"({"customers_id":1,"name":"alice","accounts":[{"acct_name":"savings"},{"acct_name":"checking"}]})");
+}
+
+TEST_CASE("sqlite: bridge join with FROM-first") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE custacct(custacct_id INTEGER PRIMARY KEY,
+                              customers_id INTEGER, accounts_id INTEGER);
+        CREATE TABLE accounts(accounts_id INTEGER PRIMARY KEY, acct_name TEXT);
+        INSERT INTO customers VALUES(1, 'alice');
+        INSERT INTO accounts VALUES(100, 'savings');
+        INSERT INTO accounts VALUES(101, 'checking');
+        INSERT INTO custacct VALUES(1, 1, 100);
+        INSERT INTO custacct VALUES(2, 1, 101);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM customers c SELECT {
+            customers_id, name,
+            accounts: FROM c->custacct<-accounts a ORDER BY a.accounts_id
+                      SELECT { acct_name },
+        }
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] ==
+        R"({"customers_id":1,"name":"alice","accounts":[{"acct_name":"savings"},{"acct_name":"checking"}]})");
+}
+
 // ── SQL passthrough ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: plain SQL passthrough") {
