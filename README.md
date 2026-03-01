@@ -9,30 +9,24 @@ functions. Write nested JSON queries naturally; sqldeep rewrites them into
 **Input:**
 
 ```sql
-SELECT {
-    id,
-    name,
-    orders:
-        SELECT {
-            order_id: id,
-            items:
-                SELECT {
-                    item: 'item-' || name,
-                    qty,
-                } FROM items i WHERE order_id = o.id,
-        } FROM orders o WHERE customer_id = p.id,
-} FROM people p;
+FROM customers c SELECT {
+    customers_id, name,
+    orders: FROM c->orders o ORDER BY orders_id SELECT {
+        orders_id, total,
+        vendor: FROM o<-vendors v SELECT { vendor_name: v.name },
+    },
+}
 ```
 
 **Output:**
 
 ```sql
-SELECT json_object('id', id, 'name', name, 'orders',
-  (SELECT json_group_array(json_object('order_id', id, 'items',
-    (SELECT json_group_array(json_object('item', 'item-' || name, 'qty', qty))
-     FROM items i WHERE order_id = o.id)))
-   FROM orders o WHERE customer_id = p.id))
-FROM people p;
+SELECT json_object('customers_id', customers_id, 'name', name, 'orders',
+  (SELECT json_group_array(json_object('orders_id', orders_id, 'total', total, 'vendor',
+    (SELECT json_group_array(json_object('vendor_name', v.name))
+     FROM vendors v WHERE o.vendors_id = v.vendors_id)))
+   FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id))
+FROM customers c
 ```
 
 ## Syntax
@@ -49,10 +43,17 @@ FROM people p SELECT {
         order_id: id, total,
     },
 }
--- Same output as the SELECT-first example above
 ```
 
-Both forms produce identical SQL output and can be mixed freely.
+Plain selects (no `{ }` or `[ ]`) are also supported — the clauses are simply
+rearranged:
+
+```sql
+FROM orders WHERE total > 100 SELECT order_id, total
+-- → SELECT order_id, total FROM orders WHERE total > 100
+```
+
+Both forms produce identical output and can be mixed freely.
 
 ### Object literals
 
@@ -99,6 +100,31 @@ SELECT {
 ```
 
 Nesting works to arbitrary depth.
+
+### Join paths (`->` and `<-`)
+
+The `->` and `<-` operators generate JOIN/WHERE clauses from table relationships,
+following the convention that foreign keys are named `<table>_id`:
+
+```sql
+// One-to-many: customers → orders (orders has customers_id FK)
+FROM c->orders o
+-- → FROM orders o WHERE o.customers_id = c.customers_id
+
+// Many-to-one: orders → customers (orders has customers_id FK)
+FROM o<-customers c
+-- → FROM customers c WHERE o.customers_id = c.customers_id
+
+// Chain: customers → orders → items
+FROM c->orders o->items i
+-- → FROM orders o JOIN items i ON i.orders_id = o.orders_id
+--   WHERE o.customers_id = c.customers_id
+
+// Bridge (many-to-many via junction table)
+FROM c->custacct<-accounts a
+-- → FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id
+--   WHERE custacct.customers_id = c.customers_id
+```
 
 ### Comments and trailing commas
 
