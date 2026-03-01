@@ -373,12 +373,88 @@ private:
             lex_.error("maximum nesting depth exceeded", line, col);
     }
 
+    // Lookahead: is the current position the start of a FROM-first deep
+    // select?  Scans forward (tracking nesting depth) looking for
+    // SELECT {/[ at depth 0.  Restores lexer state before returning.
+    bool is_from_first(bool stop_comma, bool stop_rbrace,
+                       bool stop_rbracket, bool stop_rparen) {
+        auto st = lex_.save();
+        int pd = 0, bd = 0, bkd = 0;
+        while (true) {
+            Token t = lex_.next();
+            if (t.type == TokenType::Eof) break;
+
+            if (pd == 0 && bd == 0 && bkd == 0) {
+                if (stop_comma && t.type == TokenType::Comma) break;
+                if (stop_rbrace && t.type == TokenType::RBrace) break;
+                if (stop_rbracket && t.type == TokenType::RBracket) break;
+                if (stop_rparen && t.type == TokenType::RParen) break;
+                if (t.type == TokenType::Semicolon) break;
+
+                if (is_keyword(t, "SELECT")) {
+                    Token next = lex_.peek();
+                    if (next.type == TokenType::LBrace ||
+                        next.type == TokenType::LBracket) {
+                        lex_.restore(st);
+                        return true;
+                    }
+                }
+            }
+
+            if (t.type == TokenType::LParen) ++pd;
+            if (t.type == TokenType::RParen && pd > 0) --pd;
+            if (t.type == TokenType::LBrace) ++bd;
+            if (t.type == TokenType::RBrace && bd > 0) --bd;
+            if (t.type == TokenType::LBracket) ++bkd;
+            if (t.type == TokenType::RBracket && bkd > 0) --bkd;
+        }
+        lex_.restore(st);
+        return false;
+    }
+
+    // Parse FROM-first deep select: FROM ... SELECT {/[
+    // Current position is before FROM.
+    std::unique_ptr<DeepSelect> parse_from_first_deep_select(
+            bool stop_comma, bool stop_rbrace,
+            bool stop_rbracket, bool stop_rparen,
+            int depth) {
+        Token from_tok = lex_.peek();
+        check_depth(depth, from_tok.line, from_tok.col);
+
+        // Parse body (FROM ... WHERE ... etc.) until SELECT {/[
+        auto body = parse_sql_parts(stop_comma, stop_rbrace,
+                                    stop_rbracket, stop_rparen,
+                                    depth, /*stop_at_select_deep=*/true);
+
+        // Consume SELECT
+        Token select_tok = lex_.next();
+        if (!is_keyword(select_tok, "SELECT"))
+            lex_.error("expected SELECT after FROM clause",
+                       select_tok.line, select_tok.col);
+
+        // Parse projection
+        auto ds = std::make_unique<DeepSelect>();
+        Token t = lex_.peek();
+        if (t.type == TokenType::LBrace) {
+            ds->projection = std::move(*parse_object_literal(depth));
+        } else if (t.type == TokenType::LBracket) {
+            ds->projection = std::move(*parse_array_literal(depth));
+        } else {
+            lex_.error("expected '{' or '[' after SELECT",
+                       select_tok.line, select_tok.col);
+        }
+
+        ds->tail = std::move(body);
+        return ds;
+    }
+
     // Parse a sequence of SQL fragments interleaved with deep constructs.
     SqlParts parse_sql_parts(bool stop_comma,
                              bool stop_rbrace,
                              bool stop_rbracket,
                              bool stop_rparen,
-                             int depth) {
+                             int depth,
+                             bool stop_at_select_deep = false) {
         SqlParts parts;
         std::string accum;
         size_t last_end = 0; // src position after last consumed raw token
@@ -464,12 +540,34 @@ private:
                         continue;
                     }
                 }
-                // Not (SELECT {/[, restore and handle normally
+                // Not (SELECT {/[) — try (FROM ... SELECT {/[)
+                lex_.restore(st);
+                lex_.next(); // re-consume (
+                t2 = lex_.peek();
+                if (is_keyword(t2, "FROM") &&
+                    is_from_first(false, false, false, /*stop_rparen=*/true)) {
+                    flush_before(t);
+                    auto ds = parse_from_first_deep_select(
+                        /*stop_comma=*/false, /*stop_rbrace=*/false,
+                        /*stop_rbracket=*/false, /*stop_rparen=*/true,
+                        depth + 1);
+                    Token rp = lex_.next(); // consume )
+                    if (rp.type != TokenType::RParen)
+                        lex_.error("expected ')' after subquery",
+                                   rp.line, rp.col);
+                    parts.push_back(std::move(ds));
+                    last_end = rp.src_end;
+                    need_space = true;
+                    continue;
+                }
+
+                // Not a deep subquery pattern, restore to before (
                 lex_.restore(st);
             }
 
             // Check for SELECT {/[ at depth 0 (top-level deep select)
-            if (is_keyword(t, "SELECT") && paren_depth == 0) {
+            if (is_keyword(t, "SELECT") && paren_depth == 0 &&
+                !stop_at_select_deep) {
                 auto st = lex_.save();
                 lex_.next(); // consume SELECT
                 Token t2 = lex_.peek();
@@ -487,6 +585,37 @@ private:
                 }
                 // Not deep — restore and accumulate SELECT as raw SQL
                 lex_.restore(st);
+            }
+
+            // stop_at_select_deep: break when SELECT {/[ at depth 0
+            if (stop_at_select_deep && is_keyword(t, "SELECT") &&
+                paren_depth == 0) {
+                auto st = lex_.save();
+                lex_.next(); // consume SELECT
+                Token t2 = lex_.peek();
+                if (t2.type == TokenType::LBrace ||
+                    t2.type == TokenType::LBracket) {
+                    lex_.restore(st);
+                    break;
+                }
+                lex_.restore(st);
+            }
+
+            // Check for FROM-first: FROM ... SELECT {/[
+            if (is_keyword(t, "FROM") && paren_depth == 0 &&
+                !stop_at_select_deep) {
+                if (is_from_first(stop_comma, stop_rbrace,
+                                  stop_rbracket, stop_rparen)) {
+                    flush_before(t);
+                    auto ds = parse_from_first_deep_select(
+                        stop_comma, stop_rbrace,
+                        stop_rbracket, stop_rparen,
+                        depth + 1);
+                    parts.push_back(std::move(ds));
+                    last_end = lex_.offset();
+                    need_space = true;
+                    continue;
+                }
             }
 
             // Check for inline { or [ at depth 0

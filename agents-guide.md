@@ -45,11 +45,15 @@ SQLDEEP_VERSION_PATCH // 0
 
 ## Syntax quick reference
 
+Both SELECT-first and FROM-first syntax are supported (identical output):
+
 | Input pattern | Output |
 |---|---|
 | `SELECT { fields } FROM ...` | `SELECT json_object(...) FROM ...` |
-| Nested `SELECT { ... } FROM ...` | `(SELECT json_group_array(json_object(...)) FROM ...)` |
+| `FROM ... SELECT { fields }` | same (FROM-first alternative) |
+| Nested deep select | `(SELECT json_group_array(json_object(...)) FROM ...)` |
 | `SELECT [expr] FROM ...` | `SELECT json_group_array(expr) FROM ...` |
+| `FROM ... SELECT [expr]` | same (FROM-first alternative) |
 | `[expr, ...]` | `json_array(...)` |
 | `{ fields }` (inline) | `json_object(...)` |
 
@@ -83,49 +87,48 @@ SQLDEEP_VERSION_PATCH // 0
   distinguish structural commas (field separators) from commas inside
   expressions like function calls. Bare commas outside parentheses end a field
   value.
-- **Subquery wrapping.** `(SELECT { ... })` in parentheses is recognised
-  specially — sqldeep avoids double-wrapping with extra parens.
+- **Subquery wrapping.** `(SELECT { ... })` and `(FROM ... SELECT { ... })` in
+  parentheses are recognised specially — sqldeep avoids double-wrapping with
+  extra parens.
 
 ## Common patterns
 
-### Basic object query
+### Basic (FROM-first)
 
 ```
-SELECT { id, name, email } FROM users WHERE active = 1
+FROM users WHERE active = 1 SELECT { id, name, email }
 ```
 
-### Nested one-to-many (auto-join)
+### Nested one-to-many (auto-join, FROM-first)
 
 ```
-SELECT {
+FROM customers c SELECT {
     customers_id, name,
-    orders: SELECT { orders_id, total } FROM c->orders,
-} FROM customers c
-```
-
-### Three-level nesting (auto-join)
-
-```
-SELECT {
-    customers_id, name,
-    orders: SELECT {
+    orders: FROM c->orders o ORDER BY orders_id SELECT {
         orders_id,
-        items: SELECT { name, qty } FROM o->items ORDER BY items_id,
-    } FROM c->orders o ORDER BY orders_id,
-} FROM customers c
+        items: FROM o->items ORDER BY items_id SELECT { name, qty },
+    },
+}
 ```
 
 ### Nested one-to-many (explicit WHERE)
 
 ```
-SELECT {
+FROM customers c SELECT {
     id, name,
-    orders: SELECT { order_id: id, total } FROM orders o WHERE o.cid = c.id,
-} FROM customers c
+    orders: FROM orders o WHERE o.cid = c.id SELECT { order_id: id, total },
+}
 ```
 
 ### Inline array
 
 ```
-SELECT { tags: [1, 'two', 3] } FROM items
+FROM items SELECT { tags: [1, 'two', 3] }
+```
+
+### SELECT-first (also supported)
+
+```
+SELECT { id, name } FROM users
+SELECT { id, orders: SELECT { total } FROM orders WHERE cid = c.id } FROM customers c
 ```

@@ -37,12 +37,31 @@ FROM people p;
 
 ## Syntax
 
+### FROM-first syntax
+
+sqldeep supports both `SELECT { ... } FROM ...` and `FROM ... SELECT { ... }`.
+The FROM-first form reads top-down — data source first, shape second:
+
+```sql
+FROM people p SELECT {
+    id, name,
+    orders: FROM orders o WHERE customer_id = p.id SELECT {
+        order_id: id, total,
+    },
+}
+-- Same output as the SELECT-first example above
+```
+
+Both forms produce identical SQL output and can be mixed freely.
+
 ### Object literals
 
-Use `{ }` after `SELECT` to construct JSON objects:
+Use `{ }` with `SELECT` to construct JSON objects:
 
 ```sql
 SELECT { id, name } FROM users
+-- or equivalently:
+FROM users SELECT { id, name }
 -- → SELECT json_object('id', id, 'name', name) FROM users
 ```
 
