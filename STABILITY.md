@@ -51,6 +51,7 @@ Snapshot as of v0.3.0.
 | Bridge join | `FROM c->custacct<-accounts a` | **Needs review** |
 | Line comments | `// comment` | **Stable** |
 | Trailing commas | `{ id, name, }` | **Stable** |
+| Plain FROM-first select | `FROM t SELECT id, name` | **Stable** |
 | SQL passthrough | `SELECT id FROM t` | **Stable** |
 
 ### Output semantics
@@ -64,6 +65,7 @@ Snapshot as of v0.3.0.
 | Forward join | `FROM table WHERE table.parent_id = alias.parent_id` | **Needs review** |
 | Reverse join | `FROM table WHERE alias.table_id = table.table_id` | **Needs review** |
 | Join path chain | `FROM t1 JOIN t2 ON ... WHERE ...` | **Needs review** |
+| Plain FROM-first select | `SELECT expr FROM ...` (rearranged, no JSON) | **Stable** |
 | FK convention | `<table>_id` column naming | **Needs review** |
 
 ## Gaps and prerequisites

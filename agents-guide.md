@@ -37,9 +37,9 @@ try {
 ### Version macros
 
 ```cpp
-SQLDEEP_VERSION       // "0.2.0"
+SQLDEEP_VERSION       // "0.3.0"
 SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 2
+SQLDEEP_VERSION_MINOR // 3
 SQLDEEP_VERSION_PATCH // 0
 ```
 
@@ -54,6 +54,7 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 | Nested deep select | `(SELECT json_group_array(json_object(...)) FROM ...)` |
 | `SELECT [expr] FROM ...` | `SELECT json_group_array(expr) FROM ...` |
 | `FROM ... SELECT [expr]` | same (FROM-first alternative) |
+| `FROM ... SELECT expr` | `SELECT expr FROM ...` (plain rearrangement) |
 | `[expr, ...]` | `json_array(...)` |
 | `{ fields }` (inline) | `json_object(...)` |
 
@@ -90,9 +91,9 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
   distinguish structural commas (field separators) from commas inside
   expressions like function calls. Bare commas outside parentheses end a field
   value.
-- **Subquery wrapping.** `(SELECT { ... })` and `(FROM ... SELECT { ... })` in
-  parentheses are recognised specially — sqldeep avoids double-wrapping with
-  extra parens.
+- **Subquery wrapping.** `(SELECT { ... })`, `(FROM ... SELECT { ... })`, and
+  `(FROM ... SELECT expr)` in parentheses are recognised specially — sqldeep
+  avoids double-wrapping with extra parens.
 
 ## Common patterns
 

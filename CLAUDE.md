@@ -62,6 +62,7 @@ Pure `string → string` transformation. No SQLite dependency.
 - Nested `FROM ... SELECT { ... }` → same output (FROM-first alternative)
 - `SELECT [expr] FROM ...` → `SELECT json_group_array(expr) FROM ...`
 - `FROM ... SELECT [expr]` → same output (FROM-first alternative)
+- `FROM ... SELECT expr` → `SELECT expr FROM ...` (plain rearrangement, no JSON wrapping)
 - `[expr, ...]` → `json_array(...)`
 - `{ fields }` → `json_object(...)` (inline)
 - Bare field: `id,` → `'id', id`
@@ -94,7 +95,8 @@ mkfile              Build system (mk)
   fields, trailing commas, inline arrays, nested subqueries (2- and 3-level),
   mixed array/object nesting, comments, SQL passthrough, key escaping, nesting
   depth limits, auto-join (`->`), reverse join (`<-`), join path chains
-  (grandchild, bridge/many-to-many, three-step), FROM-first variants, error cases
+  (grandchild, bridge/many-to-many, three-step), FROM-first variants (deep and
+  plain), error cases
 
 - `test_sqlite.cpp` — integration tests: transpile sqldeep syntax, execute the
   resulting SQL against an in-memory SQLite database, and verify the JSON output.

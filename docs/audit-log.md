@@ -16,3 +16,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `51f6359`
 - **Outcome**: Released v0.2.0. Added auto-join syntax (`c->orders`) with lexer pre-scan for alias resolution, agents-guide.md, STABILITY.md. All 55 tests pass (7 new: 5 transpilation, 2 SQLite integration).
+
+## 2026-03-01 — /release v0.3.0
+
+- **Commit**: `working tree dirty`
+- **Outcome**: Released v0.3.0. Added reverse join (`<-`), join path chains, bridge joins, FROM-first syntax for deep and plain selects, GitHub Actions CI (Linux + macOS). All 94 tests pass (39 new since v0.2.0).
