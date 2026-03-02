@@ -21,3 +21,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `18cccc4`
 - **Outcome**: Released v0.3.0. Added reverse join (`<-`), join path chains, bridge joins, FROM-first syntax for deep and plain selects, GitHub Actions CI (Linux + macOS). All 94 tests pass (39 new since v0.2.0).
+
+## 2026-03-02 — /release v0.4.0
+
+- **Commit**: `82735e0`
+- **Outcome**: Released v0.4.0. Added singular select (`SELECT/1`) for single-row projections and FK-guided join path transpilation (explicit FK metadata, multi-column FKs). All 111 tests pass (17 new since v0.3.0).
