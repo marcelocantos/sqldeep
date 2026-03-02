@@ -7,6 +7,26 @@
   `<parent_table>_id`. E.g., `c->orders ON person_id` or
   `c->orders USING (cust_id)`.
 
+## Portability
+
+- [ ] **Port C++ implementation to C**
+  A pure C implementation would dramatically widen sqldeep's reach — C has
+  stable ABI, trivial FFI from virtually every language (Go via cgo, Python
+  via ctypes/cffi, Rust via bindgen, etc.), and could be vendored alongside
+  sqlite3.c as a companion `.c`/`.h` pair. Considerations:
+  - **API**: `sqldeep_transpile(const char* input, char** output, char** error)`
+    with caller-frees or a `sqldeep_free()` function. FK-guided variant takes
+    an array of FK structs.
+  - **Parser**: Rewrite the recursive descent parser in C. The lexer and parser
+    are already straightforward — the main challenge is replacing `std::string`,
+    `std::vector`, `std::variant`, and `std::unique_ptr` with manual buffer
+    management.
+  - **Coexistence**: Could maintain both C and C++ versions, or make C++ a thin
+    wrapper over the C core. The latter avoids divergence.
+  - **SQLite loadable extension**: A C implementation could be compiled as a
+    SQLite loadable extension (`sqlite3_extension_init`), adding a
+    `sqldeep_transpile()` SQL function directly inside SQLite.
+
 ## Integration
 
 - [ ] **Transparent SQLite integration — investigate approaches for C++ and Go**
