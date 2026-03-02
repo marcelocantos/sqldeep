@@ -219,6 +219,11 @@ at runtime.
 If you use an agentic coding tool, include `agents-guide.md` in your project
 context.
 
+## Related projects
+
+- **[sqlift](https://github.com/marcelocantos/sqlift)** — Declarative SQLite schema migrations. Describe your desired schema; sqlift diffs and applies the changes.
+- **[sqlpipe](https://github.com/marcelocantos/sqlpipe)** — Streaming SQLite replication protocol. Keeps two databases in sync over any transport.
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
