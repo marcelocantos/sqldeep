@@ -28,3 +28,14 @@ notice, here is a blessing:
 SQLite is in the public domain. See vendor/src/sqlite3.LICENSE.
 
 Used for: integration testing (test-only dependency, not part of the library).
+
+================================================================================
+
+fkYAML 0.4.2
+https://github.com/fktn-k/fkYAML
+
+Copyright (c) 2023-2025 Kensuke Fukutani
+Licensed under the MIT License.
+See vendor/include/fkYAML/node.LICENSE for the full license text.
+
+Used for: YAML test data loading (test-only dependency, not part of the library).
