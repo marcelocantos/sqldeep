@@ -14,16 +14,18 @@ import (
 // ── YAML schema (private, tags match YAML field names) ──────────────
 
 type yamlConventionCase struct {
-	Name     string `yaml:"name"`
-	Input    string `yaml:"input"`
-	Expected string `yaml:"expected"`
+	Name             string `yaml:"name"`
+	Input            string `yaml:"input"`
+	Expected         string `yaml:"expected"`
+	ExpectedPostgres string `yaml:"expected_postgres"`
 }
 
 type yamlFKCase struct {
-	Name     string      `yaml:"name"`
-	Input    string      `yaml:"input"`
-	FKs      []yamlFK    `yaml:"fks"`
-	Expected string      `yaml:"expected"`
+	Name             string      `yaml:"name"`
+	Input            string      `yaml:"input"`
+	FKs              []yamlFK    `yaml:"fks"`
+	Expected         string      `yaml:"expected"`
+	ExpectedPostgres string      `yaml:"expected_postgres"`
 }
 
 type yamlFK struct {
@@ -111,6 +113,46 @@ func TestTranspileFK(t *testing.T) {
 			}
 			if got != tc.Expected {
 				t.Errorf("TranspileFK()\n got = %q\nwant = %q", got, tc.Expected)
+			}
+		})
+	}
+}
+
+// ── PostgreSQL convention transpile tests ────────────────────────────
+
+func TestTranspilePostgres(t *testing.T) {
+	td := loadTestData(t)
+	for _, tc := range td.Convention {
+		if tc.ExpectedPostgres == "" {
+			continue
+		}
+		t.Run(tc.Name, func(t *testing.T) {
+			got, err := TranspilePostgres(tc.Input)
+			if err != nil {
+				t.Fatalf("TranspilePostgres() error = %v", err)
+			}
+			if got != tc.ExpectedPostgres {
+				t.Errorf("TranspilePostgres()\n got = %q\nwant = %q", got, tc.ExpectedPostgres)
+			}
+		})
+	}
+}
+
+// ── PostgreSQL FK transpile tests ───────────────────────────────────
+
+func TestTranspileFKPostgres(t *testing.T) {
+	td := loadTestData(t)
+	for _, tc := range td.FK {
+		if tc.ExpectedPostgres == "" {
+			continue
+		}
+		t.Run(tc.Name, func(t *testing.T) {
+			got, err := TranspileFKPostgres(tc.Input, toFKs(tc.FKs))
+			if err != nil {
+				t.Fatalf("TranspileFKPostgres() error = %v", err)
+			}
+			if got != tc.ExpectedPostgres {
+				t.Errorf("TranspileFKPostgres()\n got = %q\nwant = %q", got, tc.ExpectedPostgres)
 			}
 		})
 	}

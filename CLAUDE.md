@@ -1,6 +1,7 @@
 # sqldeep
 
-Transpiler for JSON5-like SQL syntax to standard SQLite JSON functions.
+Transpiler for JSON5-like SQL syntax to standard SQL with database-specific
+JSON functions. Supports SQLite (default) and PostgreSQL backends.
 Two-file library: `sqldeep.h` (public API) and `sqldeep.cpp` (implementation).
 
 ## Build
@@ -22,7 +23,11 @@ system (`mkfile`).
 
 ## Architecture
 
-Pure `string → string` transformation. No SQLite dependency.
+Pure `string → string` transformation. No database dependency. The `Backend`
+enum selects which JSON function names to emit (SQLite: `json_object`,
+`json_array`, `json_group_array`; PostgreSQL: `jsonb_build_object`,
+`jsonb_build_array`, `jsonb_agg`). All other SQL (JOIN, WHERE, LIMIT, etc.)
+is standard and works unchanged across backends.
 
 ### Components (all internal to `sqldeep.cpp`)
 
@@ -47,19 +52,21 @@ Pure `string → string` transformation. No SQLite dependency.
    Handles `(SELECT {/[)` subquery pattern specially to avoid double-wrapping
    parens. Tracks paren depth and string literals to distinguish structural
    commas from expression-internal commas. Detects
-   `ident (-> | <-) table [alias] ...` join path patterns and emits `JoinPath`
-   AST nodes supporting arbitrary chains.
+   `ident (-> | <-) table [alias] [ON/USING] ...` join path patterns and emits
+   `JoinPath` AST nodes supporting arbitrary chains with optional explicit
+   column specifications.
 
-5. **Renderer** — walks AST, emits standard SQL. Object literals become
-   `json_object(...)`, array literals become `json_array(...)`, deep selects
-   at top level emit `SELECT json_object/json_group_array(...)`, nested deep
-   selects wrap in `(SELECT json_group_array(...))`. Singular selects
-   (`SELECT/1`) skip `json_group_array` wrapping and append `LIMIT 1`.
+5. **Renderer** — walks AST, emits standard SQL. Parameterised by `Backend`:
+   JSON function names (`fn_object_`, `fn_array_`, `fn_group_array_`) are set
+   at construction. Object literals become `fn_object_(...)`, array literals
+   become `fn_array_(...)`, deep selects wrap in `fn_group_array_(...)`.
+   Singular selects (`SELECT/1`) skip group-array wrapping and append
+   `LIMIT 1`.
    Join paths emit
    `FROM step1_table [JOIN step2 ON ...] WHERE step1.start_table_id = start.start_table_id`.
-   Column names come from explicit FK metadata when provided, or
-   the `<table>_id` convention otherwise. Multi-column FKs produce
-   AND-joined conditions.
+   Column names come from inline ON/USING clauses when present, then
+   explicit FK metadata when provided, or the `<table>_id` convention
+   otherwise. Multi-column joins produce AND-joined conditions.
 
 ### Syntax
 
@@ -85,8 +92,18 @@ Pure `string → string` transformation. No SQLite dependency.
   (`<-` = left table is child, has FK `<right_table>_id`)
 - Chain: `FROM c->orders o->items i` → `FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id`
 - Bridge (many-to-many): `FROM c->custacct<-accounts a` → `FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id`
+- ON shorthand: `c->orders ON person_id` → `orders.person_id = c.person_id`
+  (same column name in both tables)
+- ON explicit: `c->orders o ON id = cust_id` → `o.cust_id = c.id`
+  (left_col from left of arrow, right_col from right of arrow)
+- ON multi-column: `c->orders o ON id = cust_id AND region = region`
+  → `o.cust_id = c.id AND o.region = c.region`
+- USING: `c->orders o USING (person_id)` → `o.person_id = c.person_id`
+  (same column name(s) in both tables, standard SQL style)
+- ON/USING in chains: `c->orders o ON id = cust_id->items i ON oid = order_ref`
+  (each step can have its own ON/USING; steps without fall back to convention/FK)
 - Convention: PK = `<table>_id`, FK = same column name in child/parent table
-  (default when no FK metadata provided)
+  (default when no ON/USING and no FK metadata provided)
 - FK-guided mode: `transpile(input, foreign_keys)` uses explicit FK metadata
   instead of the naming convention. Supports multi-column FKs. Errors on
   missing or ambiguous FK matches (no convention fallback).
@@ -96,8 +113,10 @@ Pure `string → string` transformation. No SQLite dependency.
 ## File layout
 
 ```
-sqldeep.h           Public header (Error, ForeignKey, transpile())
+sqldeep.h           Public header (Backend, Error, ForeignKey, transpile())
 sqldeep.cpp         Implementation (lexer, AST, parser, renderer)
+sqldeep_c.h         C wrapper header (FFI for cgo, etc.)
+sqldeep_c.cpp       C wrapper implementation
 tests/              doctest test files
 examples/           demo.cpp
 vendor/             Third-party dependencies
@@ -106,11 +125,13 @@ mkfile              Build system (mk)
 
 ## Tests
 
-- `test_transpile.cpp` — end-to-end transpilation: basic objects, renamed
-  fields, trailing commas, inline arrays, nested subqueries (2- and 3-level),
-  mixed array/object nesting, comments, SQL passthrough, key escaping, nesting
-  depth limits, auto-join (`->`), reverse join (`<-`), join path chains
-  (grandchild, bridge/many-to-many, three-step), FROM-first variants (deep and
+- `test_transpile.cpp` — end-to-end transpilation for both SQLite and PostgreSQL
+  backends: basic objects, renamed fields, trailing commas, inline arrays,
+  nested subqueries (2- and 3-level), mixed array/object nesting, comments, SQL
+  passthrough, key escaping, nesting depth limits, auto-join (`->`), reverse
+  join (`<-`), join path chains (grandchild, bridge/many-to-many, three-step),
+  ON/USING explicit column clauses (shorthand, explicit pairs, multi-column,
+  reverse, chains, bridge, FROM-first, mixed), FROM-first variants (deep and
   plain), singular select (`SELECT/1`) variants, FK-guided joins (forward,
   reverse, chain, bridge, multi-column, error cases)
 

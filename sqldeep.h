@@ -25,6 +25,9 @@ struct ForeignKey {
     std::vector<ColumnPair> columns;  // supports multi-column FKs
 };
 
+/// Target database backend for SQL generation.
+enum class Backend { sqlite, postgres };
+
 class Error : public std::runtime_error {
 public:
     Error(const std::string& msg, int line, int col)
@@ -36,7 +39,7 @@ private:
     int col_;
 };
 
-/// Transpile sqldeep syntax to standard SQL with SQLite JSON functions.
+/// Transpile sqldeep syntax to standard SQL with SQLite JSON functions (default).
 /// Join paths (-> / <-) use the <table>_id naming convention.
 /// Throws sqldeep::Error on parse errors.
 std::string transpile(const std::string& input);
@@ -46,5 +49,14 @@ std::string transpile(const std::string& input);
 /// Throws sqldeep::Error if a join cannot be resolved or is ambiguous.
 std::string transpile(const std::string& input,
                       const std::vector<ForeignKey>& foreign_keys);
+
+/// Transpile sqldeep syntax, emitting JSON functions for the specified backend.
+/// Join paths use the <table>_id naming convention.
+std::string transpile(const std::string& input, Backend backend);
+
+/// Transpile with explicit foreign key metadata for the specified backend.
+std::string transpile(const std::string& input,
+                      const std::vector<ForeignKey>& foreign_keys,
+                      Backend backend);
 
 } // namespace sqldeep

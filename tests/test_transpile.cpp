@@ -10,6 +10,7 @@
 #include "sqldeep.h"
 
 using sqldeep::transpile;
+using sqldeep::Backend;
 using sqldeep::Error;
 using sqldeep::ForeignKey;
 
@@ -65,6 +66,35 @@ TEST_CASE("fk transpile") {
             auto expected = tc["expected"].get_value<std::string>();
             auto fks = to_fks(tc["fks"]);
             CHECK(transpile(input, fks) == expected);
+        }
+    }
+}
+
+// ── PostgreSQL convention transpile tests ────────────────────────────
+
+TEST_CASE("convention transpile (postgres)") {
+    for (const auto& tc : test_data()["convention"]) {
+        if (!tc.contains("expected_postgres")) continue;
+        auto name = tc["name"].get_value<std::string>();
+        SUBCASE(name.c_str()) {
+            auto input = tc["input"].get_value<std::string>();
+            auto expected = tc["expected_postgres"].get_value<std::string>();
+            CHECK(transpile(input, Backend::postgres) == expected);
+        }
+    }
+}
+
+// ── PostgreSQL FK transpile tests ───────────────────────────────────
+
+TEST_CASE("fk transpile (postgres)") {
+    for (const auto& tc : test_data()["fk"]) {
+        if (!tc.contains("expected_postgres")) continue;
+        auto name = tc["name"].get_value<std::string>();
+        SUBCASE(name.c_str()) {
+            auto input = tc["input"].get_value<std::string>();
+            auto expected = tc["expected_postgres"].get_value<std::string>();
+            auto fks = to_fks(tc["fks"]);
+            CHECK(transpile(input, fks, Backend::postgres) == expected);
         }
     }
 }
