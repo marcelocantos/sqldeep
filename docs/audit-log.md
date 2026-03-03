@@ -26,3 +26,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `82735e0`
 - **Outcome**: Released v0.4.0. Added singular select (`SELECT/1`) for single-row projections and FK-guided join path transpilation (explicit FK metadata, multi-column FKs). All 111 tests pass (17 new since v0.3.0).
+
+## 2026-03-04 — /release v0.5.0
+
+- **Commit**: `5db977c`
+- **Outcome**: Released v0.5.0. Added PostgreSQL backend support (`jsonb_build_object`, `jsonb_build_array`, `jsonb_agg`, `jsonb_extract_path`), ON/USING override clauses for join paths, JSON path extraction (`(expr).path`), shared YAML test data, Go bindings, and moved dist files to `dist/`. Updated agent guide with ON/USING and JSON path docs. All 260 assertions pass (36 test cases).

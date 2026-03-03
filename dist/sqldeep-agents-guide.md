@@ -55,9 +55,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "0.4.0"
+SQLDEEP_VERSION       // "0.5.0"
 SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 4
+SQLDEEP_VERSION_MINOR // 5
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```
@@ -93,8 +93,14 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
   - `<-` (many-to-one): `FROM o<-customers c` → `FROM customers c WHERE o.customers_id = c.customers_id`
   - Chains: `FROM c->orders o->items i` → `FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id`
   - Bridge (many-to-many): `FROM c->custacct<-accounts a` → `FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id`
+  - ON/USING overrides: `c->orders o ON id = cust_id` → `o.cust_id = c.id`;
+    `c->orders o USING (person_id)` → `o.person_id = c.person_id`.
+    Each step in a chain can have its own ON/USING clause; steps without fall back to convention/FK.
   - Convention mode (default): PK = `<table>_id`, FK = same column name in child/parent table.
   - FK-guided mode: pass `sqldeep_foreign_key` array to `sqldeep_transpile_fk()`. Supports multi-column FKs. Errors on missing/ambiguous FK (no convention fallback).
+- JSON path extraction: `(expr).field.sub[n]` → `json_extract(expr, '$.field.sub[n]')` (SQLite)
+  / `jsonb_extract_path(expr, 'field', 'sub', 'n')` (PostgreSQL).
+  Parentheses around the base expression disambiguate from `table.column`.
 - `//` line comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }` or `[ ]` passes through unchanged.
@@ -205,6 +211,24 @@ char* sql = sqldeep_transpile_fk(
     "orders: FROM c->orders o SELECT { total } }",
     fks, 1, &err_msg, &err_line, &err_col);
 // → o.cust_id = c.id (instead of o.customers_id = c.customers_id)
+```
+
+### ON/USING overrides (non-conventional FK columns)
+
+```
+FROM customers c SELECT {
+    name,
+    orders: FROM c->orders o ON id = cust_id SELECT { total },
+}
+// → o.cust_id = c.id (instead of o.customers_id = c.customers_id)
+```
+
+### JSON path extraction
+
+```
+FROM events SELECT { type: (data).event_type }
+// SQLite:      → json_extract(data, '$.event_type')
+// PostgreSQL:  → jsonb_extract_path(data, 'event_type')
 ```
 
 ### SELECT-first (also supported)

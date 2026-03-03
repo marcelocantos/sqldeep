@@ -9,7 +9,7 @@ period exists to get the API and syntax right.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.4.0.
+Snapshot as of v0.5.0.
 
 ### C API (`sqldeep.h`)
 
@@ -29,9 +29,9 @@ Snapshot as of v0.4.0.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.4.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.5.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `4` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `5` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
@@ -56,6 +56,9 @@ Snapshot as of v0.4.0.
 | Reverse join (`<-`) | `FROM o<-customers c` | **Needs review** |
 | Join path chain | `FROM c->orders o->items i` | **Needs review** |
 | Bridge join | `FROM c->custacct<-accounts a` | **Needs review** |
+| ON clause | `c->orders o ON id = cust_id` | **Needs review** |
+| USING clause | `c->orders o USING (person_id)` | **Needs review** |
+| JSON path extraction | `(expr).field[n]` | **Needs review** |
 | Line comments | `// comment` | **Stable** |
 | Trailing commas | `{ id, name, }` | **Stable** |
 | Plain FROM-first select | `FROM t SELECT id, name` | **Stable** |
@@ -74,6 +77,9 @@ Snapshot as of v0.4.0.
 | Reverse join | `FROM table WHERE alias.table_id = table.table_id` | **Needs review** |
 | Join path chain | `FROM t1 JOIN t2 ON ... WHERE ...` | **Needs review** |
 | Plain FROM-first select | `SELECT expr FROM ...` (rearranged, no JSON) | **Stable** |
+| ON/USING override | `o.cust_id = c.id` (explicit column pair) | **Needs review** |
+| JSON path (SQLite) | `json_extract(expr, '$.field[n]')` | **Needs review** |
+| JSON path (PostgreSQL) | `jsonb_extract_path(expr, 'field', 'n')` | **Needs review** |
 | FK convention | `<table>_id` column naming | **Needs review** |
 | FK-guided join | Uses explicit FK metadata (no convention fallback) | **Needs review** |
 | Multi-column FK | AND-joined conditions | **Needs review** |
@@ -82,13 +88,16 @@ Snapshot as of v0.4.0.
 
 Before 1.0:
 
-- **Join path syntax settling**: The `->` and `<-` operators, chains, and bridge
-  patterns are new (v0.2.0–v0.3.0). Needs real-world usage to confirm the
-  syntax, FK convention, and rendering are right. The `ON` override clause is
-  planned but not yet implemented.
+- **Join path syntax settling**: The `->` and `<-` operators, chains, bridge
+  patterns, and ON/USING overrides need real-world usage to confirm the
+  syntax, FK convention, and rendering are right.
 - **Singular select (`SELECT/1`)**: New in v0.4.0. The `/1` suffix is compact
   but unusual — needs usage feedback to confirm it's the right spelling.
-- **FK-guided joins**: New. The `ForeignKey` struct and FK-aware `transpile()`
+- **JSON path extraction**: New in v0.5.0. The `(expr).path` syntax needs
+  real-world usage to confirm it covers common patterns.
+- **PostgreSQL backend**: New in v0.5.0. The `sqldeep_backend` enum and
+  `_backend` function variants need usage to confirm the API shape is right.
+- **FK-guided joins**: The `ForeignKey` struct and FK-aware `transpile()`
   overload need real-world usage to confirm the API shape is right. Ambiguous FK
   disambiguation (multiple FKs between the same tables) is not yet supported in
   the syntax — users must use explicit WHERE clauses for now.
