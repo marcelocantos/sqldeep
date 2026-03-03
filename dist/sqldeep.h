@@ -3,8 +3,13 @@
 
 #pragma once
 
-// sqldeep C wrapper — extern "C" interface for FFI consumers (cgo, etc.).
+// sqldeep — C interface for transpiling JSON5-like SQL syntax to standard SQL.
 // Callers must free returned strings with sqldeep_free().
+
+#define SQLDEEP_VERSION       "0.4.0"
+#define SQLDEEP_VERSION_MAJOR 0
+#define SQLDEEP_VERSION_MINOR 4
+#define SQLDEEP_VERSION_PATCH 0
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,7 +56,7 @@ char* sqldeep_transpile_fk_backend(const char* input,
 // Library version string (static, do not free).
 const char* sqldeep_version(void);
 
-// Free a string allocated by the C wrapper.
+// Free a string allocated by the library.
 void sqldeep_free(void* ptr);
 
 #ifdef __cplusplus

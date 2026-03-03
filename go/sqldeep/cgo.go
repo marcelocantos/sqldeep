@@ -3,9 +3,9 @@
 
 package sqldeep
 
-//#cgo CFLAGS: -I${SRCDIR}/../..
+//#cgo CFLAGS: -I${SRCDIR}/../../dist
 //#cgo LDFLAGS: ${SRCDIR}/../../build/libsqldeep.a -lstdc++
-//#include "sqldeep_c.h"
+//#include "sqldeep.h"
 //#include <stdlib.h>
 import "C"
 import "unsafe"

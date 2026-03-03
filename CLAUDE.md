@@ -2,7 +2,7 @@
 
 Transpiler for JSON5-like SQL syntax to standard SQL with database-specific
 JSON functions. Supports SQLite (default) and PostgreSQL backends.
-Two-file library: `sqldeep.h` (public API) and `sqldeep.cpp` (implementation).
+Single public C header (`sqldeep.h`) with implementation in `sqldeep.cpp`.
 
 ## Build
 
@@ -54,7 +54,9 @@ is standard and works unchanged across backends.
    commas from expression-internal commas. Detects
    `ident (-> | <-) table [alias] [ON/USING] ...` join path patterns and emits
    `JoinPath` AST nodes supporting arbitrary chains with optional explicit
-   column specifications.
+   column specifications. Detects `(expr).path` JSON path patterns during
+   token accumulation using a paren-position stack, transforming them inline
+   to `json_extract()`/`jsonb_extract_path()` based on backend.
 
 5. **Renderer** — walks AST, emits standard SQL. Parameterised by `Backend`:
    JSON function names (`fn_object_`, `fn_array_`, `fn_group_array_`) are set
@@ -102,6 +104,10 @@ is standard and works unchanged across backends.
   (same column name(s) in both tables, standard SQL style)
 - ON/USING in chains: `c->orders o ON id = cust_id->items i ON oid = order_ref`
   (each step can have its own ON/USING; steps without fall back to convention/FK)
+- JSON path: `(expr).field.sub[n]` → `json_extract(expr, '$.field.sub[n]')` (SQLite)
+  / `jsonb_extract_path(expr, 'field', 'sub', 'n')` (PostgreSQL).
+  Parentheses around the base expression disambiguate from `table.column`.
+  Works at any paren depth (e.g. `upper((data).name)`).
 - Convention: PK = `<table>_id`, FK = same column name in child/parent table
   (default when no ON/USING and no FK metadata provided)
 - FK-guided mode: `transpile(input, foreign_keys)` uses explicit FK metadata
@@ -113,14 +119,14 @@ is standard and works unchanged across backends.
 ## File layout
 
 ```
-sqldeep.h           Public header (Backend, Error, ForeignKey, transpile())
-sqldeep.cpp         Implementation (lexer, AST, parser, renderer)
-sqldeep_c.h         C wrapper header (FFI for cgo, etc.)
-sqldeep_c.cpp       C wrapper implementation
-tests/              doctest test files
-examples/           demo.cpp
-vendor/             Third-party dependencies
-mkfile              Build system (mk)
+dist/
+  sqldeep.h                 Public C header (FFI for cgo, etc.)
+  sqldeep.cpp               Implementation (C++ internals, lexer, AST, parser, renderer, C bridge)
+  sqldeep-agents-guide.md   Agent integration guide
+tests/                      doctest test files
+examples/                   demo.cpp
+vendor/                     Third-party dependencies
+mkfile                      Build system (mk)
 ```
 
 ## Tests
@@ -131,9 +137,11 @@ mkfile              Build system (mk)
   passthrough, key escaping, nesting depth limits, auto-join (`->`), reverse
   join (`<-`), join path chains (grandchild, bridge/many-to-many, three-step),
   ON/USING explicit column clauses (shorthand, explicit pairs, multi-column,
-  reverse, chains, bridge, FROM-first, mixed), FROM-first variants (deep and
-  plain), singular select (`SELECT/1`) variants, FK-guided joins (forward,
-  reverse, chain, bridge, multi-column, error cases)
+  reverse, chains, bridge, FROM-first, mixed), JSON path extraction
+  (`(expr).field[n]` — simple, nested, qualified, array index, mixed, function
+  base, WHERE clause, inside function, array-only, passthrough, error cases),
+  FROM-first variants (deep and plain), singular select (`SELECT/1`) variants,
+  FK-guided joins (forward, reverse, chain, bridge, multi-column, error cases)
 
 - `test_sqlite.cpp` — integration tests: transpile sqldeep syntax, execute the
   resulting SQL against an in-memory SQLite database, and verify the JSON output.
@@ -149,4 +157,5 @@ focused component testing.
 ## Conventions
 
 - Apache 2.0 license with SPDX headers on all source files.
-- No logging — errors communicated via `sqldeep::Error` exceptions.
+- No logging — errors communicated via NULL return + error out-params in the
+  C API (internally via `sqldeep::Error` exceptions).

@@ -2,7 +2,7 @@
 
 ## Stability commitment
 
-Once sqldeep reaches 1.0, its public API (the `sqldeep.h` header), input syntax
+Once sqldeep reaches 1.0, its public API (the `dist/sqldeep.h` header), input syntax
 (the DSL), and output semantics become a backwards-compatibility contract.
 Breaking changes after 1.0 require forking into a new project. The pre-1.0
 period exists to get the API and syntax right.
@@ -11,18 +11,19 @@ period exists to get the API and syntax right.
 
 Snapshot as of v0.4.0.
 
-### C++ API (`sqldeep.h`)
+### C API (`sqldeep.h`)
 
 | Item | Signature | Stability |
 |------|-----------|-----------|
-| `transpile` | `std::string sqldeep::transpile(const std::string& input)` | **Stable** |
-| `transpile` (FK) | `std::string sqldeep::transpile(const std::string& input, const std::vector<ForeignKey>& foreign_keys)` | **Needs review** |
-| `ForeignKey` | `struct sqldeep::ForeignKey { from_table, to_table, columns }` | **Needs review** |
-| `ForeignKey::ColumnPair` | `struct { from_column, to_column }` | **Needs review** |
-| `Error` | `class sqldeep::Error : public std::runtime_error` | **Stable** |
-| `Error::Error` | `Error(const std::string& msg, int line, int col)` | **Stable** |
-| `Error::line` | `int line() const` | **Stable** |
-| `Error::col` | `int col() const` | **Stable** |
+| `sqldeep_transpile` | `char* sqldeep_transpile(const char* input, char** err_msg, int* err_line, int* err_col)` | **Stable** |
+| `sqldeep_transpile_fk` | `char* sqldeep_transpile_fk(const char* input, const sqldeep_foreign_key* fks, int fk_count, char** err_msg, int* err_line, int* err_col)` | **Needs review** |
+| `sqldeep_transpile_backend` | `char* sqldeep_transpile_backend(const char* input, sqldeep_backend backend, char** err_msg, int* err_line, int* err_col)` | **Needs review** |
+| `sqldeep_transpile_fk_backend` | `char* sqldeep_transpile_fk_backend(...)` | **Needs review** |
+| `sqldeep_foreign_key` | `struct { from_table, to_table, columns, column_count }` | **Needs review** |
+| `sqldeep_column_pair` | `struct { from_column, to_column }` | **Needs review** |
+| `sqldeep_backend` | `enum { SQLDEEP_SQLITE, SQLDEEP_POSTGRES }` | **Needs review** |
+| `sqldeep_version` | `const char* sqldeep_version(void)` | **Stable** |
+| `sqldeep_free` | `void sqldeep_free(void* ptr)` | **Stable** |
 
 ### Version macros (`sqldeep.h`)
 
@@ -99,8 +100,9 @@ Before 1.0:
 
 ## Out of scope for 1.0
 
-- Schema-aware transpilation (accepting a `sqlite3*` handle for automatic FK
-  introspection — FK metadata can already be passed manually via `ForeignKey`)
+- Schema-aware transpilation (accepting a database handle for automatic FK
+  introspection — FK metadata can already be passed manually via
+  `sqldeep_foreign_key`)
 - Multi-statement input (`;`-separated)
-- PostgreSQL / MySQL output targets
-- Aggregate functions beyond `json_group_array`
+- MySQL output target
+- Aggregate functions beyond `json_group_array` / `jsonb_agg`

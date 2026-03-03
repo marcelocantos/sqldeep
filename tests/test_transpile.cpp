@@ -3,20 +3,101 @@
 #include <doctest.h>
 #include <fkYAML/node.hpp>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include "sqldeep.h"
 
-using sqldeep::transpile;
-using sqldeep::Backend;
-using sqldeep::Error;
-using sqldeep::ForeignKey;
+// ── Test helpers ─────────────────────────────────────────────────────
 
-// ── YAML loader (shared across all TEST_CASEs) ─────────────────────
+namespace {
 
-static const fkyaml::node& test_data() {
+// RAII wrapper for malloc'd strings returned by the C API.
+struct SdStr {
+    char* p;
+    explicit SdStr(char* s) : p(s) {}
+    ~SdStr() { if (p) sqldeep_free(p); }
+    SdStr(const SdStr&) = delete;
+    SdStr& operator=(const SdStr&) = delete;
+};
+
+// Test-local error type matching the old sqldeep::Error interface.
+struct Error {
+    std::string msg;
+    int line_, col_;
+    int line() const { return line_; }
+    int col() const { return col_; }
+};
+
+// Owned FK data parsed from YAML.
+struct OwnedFk {
+    std::string from_table, to_table;
+    struct Col { std::string from_column, to_column; };
+    std::vector<Col> columns;
+};
+
+// ── transpile wrappers (C API → C++ exceptions) ─────────────────────
+
+std::string transpile(const std::string& input) {
+    char* err_msg = nullptr;
+    int err_line = 0, err_col = 0;
+    SdStr result{sqldeep_transpile(input.c_str(), &err_msg, &err_line, &err_col)};
+    if (!result.p) {
+        SdStr err{err_msg};
+        throw Error{err.p ? err.p : "", err_line, err_col};
+    }
+    return result.p;
+}
+
+std::string transpile(const std::string& input, sqldeep_backend backend) {
+    char* err_msg = nullptr;
+    int err_line = 0, err_col = 0;
+    SdStr result{sqldeep_transpile_backend(input.c_str(), backend,
+                                            &err_msg, &err_line, &err_col)};
+    if (!result.p) {
+        SdStr err{err_msg};
+        throw Error{err.p ? err.p : "", err_line, err_col};
+    }
+    return result.p;
+}
+
+// Build C FK structs from owned data and call the FK transpile API.
+std::string transpile(const std::string& input,
+                       const std::vector<OwnedFk>& fks,
+                       sqldeep_backend backend = SQLDEEP_SQLITE) {
+    // Build column pairs
+    std::vector<std::vector<sqldeep_column_pair>> all_cols;
+    all_cols.reserve(fks.size());
+    for (const auto& f : fks) {
+        auto& cols = all_cols.emplace_back();
+        for (const auto& c : f.columns)
+            cols.push_back({c.from_column.c_str(), c.to_column.c_str()});
+    }
+    // Build FK structs
+    std::vector<sqldeep_foreign_key> c_fks;
+    c_fks.reserve(fks.size());
+    for (size_t i = 0; i < fks.size(); ++i) {
+        c_fks.push_back({fks[i].from_table.c_str(), fks[i].to_table.c_str(),
+                          all_cols[i].data(),
+                          static_cast<int>(all_cols[i].size())});
+    }
+    // Call C API
+    char* err_msg = nullptr;
+    int err_line = 0, err_col = 0;
+    SdStr result{sqldeep_transpile_fk_backend(
+        input.c_str(), backend,
+        c_fks.data(), static_cast<int>(c_fks.size()),
+        &err_msg, &err_line, &err_col)};
+    if (!result.p) {
+        SdStr err{err_msg};
+        throw Error{err.p ? err.p : "", err_line, err_col};
+    }
+    return result.p;
+}
+
+// ── YAML loader ─────────────────────────────────────────────────────
+
+const fkyaml::node& test_data() {
     static const auto data = [] {
         std::ifstream ifs("testdata/transpile.yaml");
         REQUIRE(ifs.good());
@@ -25,11 +106,11 @@ static const fkyaml::node& test_data() {
     return data;
 }
 
-// Convert YAML fks array to std::vector<ForeignKey>.
-static std::vector<ForeignKey> to_fks(const fkyaml::node& node) {
-    std::vector<ForeignKey> fks;
+// Convert YAML fks array to owned FK data.
+std::vector<OwnedFk> to_fks(const fkyaml::node& node) {
+    std::vector<OwnedFk> fks;
     for (const auto& fk : node) {
-        ForeignKey f;
+        OwnedFk f;
         f.from_table = fk["from_table"].get_value<std::string>();
         f.to_table = fk["to_table"].get_value<std::string>();
         for (const auto& col : fk["columns"]) {
@@ -42,6 +123,8 @@ static std::vector<ForeignKey> to_fks(const fkyaml::node& node) {
     }
     return fks;
 }
+
+} // namespace
 
 // ── Convention transpile tests ──────────────────────────────────────
 
@@ -79,7 +162,7 @@ TEST_CASE("convention transpile (postgres)") {
         SUBCASE(name.c_str()) {
             auto input = tc["input"].get_value<std::string>();
             auto expected = tc["expected_postgres"].get_value<std::string>();
-            CHECK(transpile(input, Backend::postgres) == expected);
+            CHECK(transpile(input, SQLDEEP_POSTGRES) == expected);
         }
     }
 }
@@ -94,7 +177,7 @@ TEST_CASE("fk transpile (postgres)") {
             auto input = tc["input"].get_value<std::string>();
             auto expected = tc["expected_postgres"].get_value<std::string>();
             auto fks = to_fks(tc["fks"]);
-            CHECK(transpile(input, fks, Backend::postgres) == expected);
+            CHECK(transpile(input, fks, SQLDEEP_POSTGRES) == expected);
         }
     }
 }
