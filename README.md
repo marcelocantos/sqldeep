@@ -1,8 +1,9 @@
 # sqldeep
 
-A C++ transpiler that converts JSON5-like SQL syntax into standard SQLite JSON
-functions. Write nested JSON queries naturally; sqldeep rewrites them into
-`json_object()`, `json_array()`, and `json_group_array()` calls.
+A transpiler that converts JSON5-like SQL syntax into standard SQL with
+database-specific JSON functions. Write nested JSON queries naturally; sqldeep
+rewrites them into `json_object()` / `jsonb_build_object()`, etc. Supports
+SQLite (default) and PostgreSQL backends.
 
 ## Example
 
@@ -149,22 +150,18 @@ FROM c->custacct<-accounts a
 
 ### FK-guided joins
 
-Pass a `std::vector<sqldeep::ForeignKey>` to `transpile()` to resolve join
-paths from real FK metadata instead of the `<table>_id` convention. This
-supports non-conventional column names and multi-column foreign keys:
+Pass foreign key metadata to `sqldeep_transpile_fk()` to resolve join paths
+from real FK information instead of the `<table>_id` convention. This supports
+non-conventional column names and multi-column foreign keys:
 
-```cpp
-std::vector<sqldeep::ForeignKey> fks = {
-    {"orders", "customers", {{"cust_id", "id"}}},           // single-column
-    {"sales", "regions", {{"region", "region"},              // multi-column
-                           {"shop", "shop"}}},
-};
-std::string sql = sqldeep::transpile(input, fks);
+```c
+sqldeep_column_pair cols[] = {{"cust_id", "id"}};
+sqldeep_foreign_key fks[] = {{"orders", "customers", cols, 1}};
+char* sql = sqldeep_transpile_fk(input, fks, 1, &err_msg, &err_line, &err_col);
 ```
 
 When FK metadata is provided, every join must be resolvable from it — there is
-no fallback to the naming convention. Missing or ambiguous FKs throw
-`sqldeep::Error`.
+no fallback to the naming convention. Missing or ambiguous FKs return an error.
 
 ### Comments and trailing commas
 
@@ -178,27 +175,35 @@ unchanged.
 
 ## API
 
-```cpp
+The public interface is a C header (`sqldeep.h`) suitable for direct use from
+C/C++ or via FFI (Go/cgo, Rust, Python, etc.):
+
+```c
 #include "sqldeep.h"
 
+char* err_msg = NULL;
+int err_line = 0, err_col = 0;
+
 // Convention-based (uses <table>_id for join paths):
-std::string sql = sqldeep::transpile(R"(
-    SELECT { id, name } FROM users
-)");
+char* sql = sqldeep_transpile("SELECT { id, name } FROM users",
+                               &err_msg, &err_line, &err_col);
+// Use sql... then free:
+sqldeep_free(sql);
 
 // FK-guided (uses explicit foreign key metadata):
-std::vector<sqldeep::ForeignKey> fks = {
-    {"orders", "customers", {{"cust_id", "id"}}},
-};
-std::string sql2 = sqldeep::transpile(R"(
-    FROM customers c SELECT { name,
-        orders: FROM c->orders o SELECT { total },
-    }
-)", fks);
+sqldeep_column_pair cols[] = {{"cust_id", "id"}};
+sqldeep_foreign_key fks[] = {{"orders", "customers", cols, 1}};
+char* sql2 = sqldeep_transpile_fk(input, fks, 1,
+                                    &err_msg, &err_line, &err_col);
+
+// PostgreSQL backend:
+char* sql3 = sqldeep_transpile_backend(input, SQLDEEP_POSTGRES,
+                                        &err_msg, &err_line, &err_col);
 ```
 
-On parse errors (or unresolvable joins in FK mode), throws `sqldeep::Error`
-(subclass of `std::runtime_error`) with `line()` and `col()` accessors.
+On error, functions return `NULL` and set the `err_msg`, `err_line`, and
+`err_col` out-parameters. Free returned strings (including error messages) with
+`sqldeep_free()`.
 
 ## Building
 
@@ -213,11 +218,11 @@ Requires C++20 and [mk](https://github.com/marcelocantos/mk).
 
 ## Integration
 
-Copy `sqldeep.h` and `sqldeep.cpp` into your project. No external dependencies
-at runtime.
+Copy the contents of `dist/` (`sqldeep.h`, `sqldeep.cpp`) into your project.
+No external dependencies at runtime.
 
-If you use an agentic coding tool, include `agents-guide.md` in your project
-context.
+If you use an agentic coding tool, include `dist/sqldeep-agents-guide.md` in
+your project context.
 
 ## Related projects
 

@@ -60,18 +60,38 @@ std::vector<std::string> query(sqlite3* db, const std::string& sql) {
     return rows;
 }
 
-// Transpile and execute, returning result rows.
+// Transpile via C API and execute, returning result rows.
 std::vector<std::string> transpile_and_query(sqlite3* db,
                                               const std::string& deep_sql) {
-    std::string sql = sqldeep::transpile(deep_sql);
+    char* err_msg = nullptr;
+    int err_line = 0, err_col = 0;
+    char* result = sqldeep_transpile(deep_sql.c_str(),
+                                      &err_msg, &err_line, &err_col);
+    if (!result) {
+        std::string msg = err_msg ? err_msg : "unknown error";
+        if (err_msg) sqldeep_free(err_msg);
+        throw std::runtime_error("transpile failed: " + msg);
+    }
+    std::string sql(result);
+    sqldeep_free(result);
     return query(db, sql);
 }
 
-// Transpile with FK info and execute.
+// Transpile with FK info via C API and execute.
 std::vector<std::string> transpile_and_query(
         sqlite3* db, const std::string& deep_sql,
-        const std::vector<sqldeep::ForeignKey>& fks) {
-    std::string sql = sqldeep::transpile(deep_sql, fks);
+        const sqldeep_foreign_key* fks, int fk_count) {
+    char* err_msg = nullptr;
+    int err_line = 0, err_col = 0;
+    char* result = sqldeep_transpile_fk(deep_sql.c_str(), fks, fk_count,
+                                         &err_msg, &err_line, &err_col);
+    if (!result) {
+        std::string msg = err_msg ? err_msg : "unknown error";
+        if (err_msg) sqldeep_free(err_msg);
+        throw std::runtime_error("transpile failed: " + msg);
+    }
+    std::string sql(result);
+    sqldeep_free(result);
     return query(db, sql);
 }
 
@@ -650,7 +670,11 @@ TEST_CASE("sqlite: plain SQL passthrough") {
     exec(g.db, "INSERT INTO t VALUES(1, 'alice')");
 
     // No deep constructs — should pass through and work normally
-    auto rows = query(g.db, sqldeep::transpile("SELECT id, name FROM t"));
+    char* result = sqldeep_transpile("SELECT id, name FROM t",
+                                      nullptr, nullptr, nullptr);
+    REQUIRE(result);
+    auto rows = query(g.db, result);
+    sqldeep_free(result);
 
     REQUIRE(rows.size() == 1);
     CHECK(rows[0] == "1");
@@ -669,15 +693,14 @@ TEST_CASE("sqlite: fk-guided join") {
         INSERT INTO orders VALUES(11, 1, 42.0);
     )");
 
-    std::vector<sqldeep::ForeignKey> fks = {
-        {"orders", "customers", {{"cust_id", "id"}}},
-    };
+    sqldeep_column_pair cols[] = {{"cust_id", "id"}};
+    sqldeep_foreign_key fks[] = {{"orders", "customers", cols, 1}};
     auto rows = transpile_and_query(g.db, R"(
         SELECT {
             name,
             orders: FROM c->orders o ORDER BY o.id SELECT { total },
         } FROM customers c
-    )", fks);
+    )", fks, 1);
 
     REQUIRE(rows.size() == 1);
     CHECK(rows[0] == R"({"name":"alice","orders":[{"total":99.5},{"total":42.0}]})");
@@ -697,15 +720,14 @@ TEST_CASE("sqlite: fk-guided multi-column join") {
         INSERT INTO sales VALUES(3, 'east', 'b', 50.0);
     )");
 
-    std::vector<sqldeep::ForeignKey> fks = {
-        {"sales", "regions", {{"region", "region"}, {"shop", "shop"}}},
-    };
+    sqldeep_column_pair cols[] = {{"region", "region"}, {"shop", "shop"}};
+    sqldeep_foreign_key fks[] = {{"sales", "regions", cols, 2}};
     auto rows = transpile_and_query(g.db, R"(
         SELECT {
             name,
             sales: FROM r->sales s ORDER BY s.id SELECT { amount },
         } FROM regions r ORDER BY r.region, r.shop
-    )", fks);
+    )", fks, 1);
 
     REQUIRE(rows.size() == 2);
     CHECK(rows[0] == R"({"name":"East A","sales":[{"amount":100.0},{"amount":200.0}]})");

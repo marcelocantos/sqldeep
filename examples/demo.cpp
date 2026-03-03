@@ -4,7 +4,7 @@
 #include <iostream>
 
 int main() {
-    std::string input = R"(SELECT {
+    const char* input = R"(SELECT {
     id,
     name,
     orders:
@@ -20,14 +20,18 @@ int main() {
 
     std::cout << "Input:\n" << input << "\n\n";
 
-    try {
-        std::string output = sqldeep::transpile(input);
+    char* err_msg = nullptr;
+    int err_line = 0, err_col = 0;
+    char* output = sqldeep_transpile(input, &err_msg, &err_line, &err_col);
+
+    if (output) {
         std::cout << "Output:\n" << output << "\n";
-    } catch (const sqldeep::Error& e) {
-        std::cerr << "Error at line " << e.line() << ", col " << e.col()
-                  << ": " << e.what() << "\n";
+        sqldeep_free(output);
+        return 0;
+    } else {
+        std::cerr << "Error at line " << err_line << ", col " << err_col
+                  << ": " << (err_msg ? err_msg : "unknown") << "\n";
+        sqldeep_free(err_msg);
         return 1;
     }
-
-    return 0;
 }

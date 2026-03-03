@@ -3,14 +3,44 @@
 #include "sqldeep.h"
 
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 
 namespace sqldeep {
+
+// ── Internal C++ types (not exposed in public C header) ─────────────
+
+struct ForeignKey {
+    std::string from_table;   // child table (has the FK column(s))
+    std::string to_table;     // parent/referenced table
+
+    struct ColumnPair {
+        std::string from_column;  // FK column in child
+        std::string to_column;    // referenced column in parent
+    };
+    std::vector<ColumnPair> columns;  // supports multi-column FKs
+};
+
+enum class Backend { sqlite, postgres };
+
+class Error : public std::runtime_error {
+public:
+    Error(const std::string& msg, int line, int col)
+        : std::runtime_error(msg), line_(line), col_(col) {}
+    int line() const { return line_; }
+    int col() const { return col_; }
+private:
+    int line_;
+    int col_;
+};
+
 namespace {
 
 static constexpr int kMaxNestingDepth = 200;
@@ -247,6 +277,9 @@ struct JoinPath {
         bool forward;       // true = ->, false = <-
         std::string table;
         std::string alias;  // empty if none
+        // Explicit column pairs: {child_col, parent_col}.
+        // Empty = use convention/FK resolution.
+        std::vector<std::pair<std::string, std::string>> columns;
     };
     std::string start_alias;  // e.g. "c"
     std::string start_table;  // e.g. "customers" (resolved from alias_map)
@@ -282,7 +315,7 @@ static bool is_sql_keyword(const std::string& s) {
         "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN", "EXISTS",
         "CASE", "WHEN", "THEN", "ELSE", "END", "SET", "INTO",
         "VALUES", "INSERT", "UPDATE", "DELETE", "DISTINCT", "ALL",
-        "ASC", "DESC", "BY", "OFFSET", "FETCH", "FOR", "WITH",
+        "ASC", "DESC", "BY", "OFFSET", "FETCH", "FOR", "WITH", "USING",
     };
     for (const char* kw : keywords) {
         if (is_keyword({TokenType::Ident, s, 0, 0, 0, 0}, kw))
@@ -293,6 +326,109 @@ static bool is_sql_keyword(const std::string& s) {
 
 static bool is_from_or_join(const Token& t) {
     return is_keyword(t, "FROM") || is_keyword(t, "JOIN");
+}
+
+// Parse ON/USING clause after a join path step.
+// If out is non-null, stores {child_col, parent_col} pairs.
+// If out is null (skip mode for prescan), just advances past the tokens.
+static void parse_on_using(Lexer& lex, bool forward,
+                           std::vector<std::pair<std::string,std::string>>* out) {
+    Token t = lex.peek();
+
+    if (is_keyword(t, "ON")) {
+        lex.next(); // consume ON
+        Token first = lex.peek();
+        if (first.type != TokenType::Ident)
+            lex.error("expected column name after ON", first.line, first.col);
+        lex.next(); // consume first ident
+
+        Token eq = lex.peek();
+        if (eq.type == TokenType::Other && eq.text == "=") {
+            // Explicit pair mode: left_col = right_col
+            lex.next(); // consume =
+            Token second = lex.peek();
+            if (second.type != TokenType::Ident)
+                lex.error("expected column name after '='",
+                          second.line, second.col);
+            lex.next(); // consume second ident
+
+            if (out) {
+                if (forward) {
+                    // child = right of arrow: {right_col, left_col}
+                    out->push_back({second.text, first.text});
+                } else {
+                    // child = left of arrow: {left_col, right_col}
+                    out->push_back({first.text, second.text});
+                }
+            }
+
+            // Loop: AND ident = ident (save/restore to avoid consuming
+            // outer SQL's AND when pattern doesn't match).
+            while (true) {
+                auto st = lex.save();
+                Token and_tok = lex.peek();
+                if (!is_keyword(and_tok, "AND")) break;
+                lex.next(); // tentatively consume AND
+                Token col1 = lex.peek();
+                if (col1.type != TokenType::Ident) { lex.restore(st); break; }
+                lex.next();
+                Token eq2 = lex.peek();
+                if (eq2.type != TokenType::Other || eq2.text != "=") {
+                    lex.restore(st); break;
+                }
+                lex.next();
+                Token col2 = lex.peek();
+                if (col2.type != TokenType::Ident) { lex.restore(st); break; }
+                lex.next();
+
+                if (out) {
+                    if (forward) {
+                        out->push_back({col2.text, col1.text});
+                    } else {
+                        out->push_back({col1.text, col2.text});
+                    }
+                }
+            }
+        } else {
+            // Shorthand mode: same column name in both tables
+            if (out) {
+                out->push_back({first.text, first.text});
+            }
+        }
+    } else if (is_keyword(t, "USING")) {
+        lex.next(); // consume USING
+        Token lparen = lex.peek();
+        if (lparen.type != TokenType::LParen)
+            lex.error("expected '(' after USING", lparen.line, lparen.col);
+        lex.next(); // consume (
+
+        Token check = lex.peek();
+        if (check.type == TokenType::RParen)
+            lex.error("empty USING clause", check.line, check.col);
+
+        while (true) {
+            Token col = lex.peek();
+            if (col.type != TokenType::Ident)
+                lex.error("expected column name in USING clause",
+                          col.line, col.col);
+            lex.next();
+
+            if (out) {
+                out->push_back({col.text, col.text});
+            }
+
+            Token next = lex.peek();
+            if (next.type == TokenType::Comma) {
+                lex.next();
+            } else if (next.type == TokenType::RParen) {
+                lex.next();
+                break;
+            } else {
+                lex.error("expected ',' or ')' in USING clause",
+                          next.line, next.col);
+            }
+        }
+    }
 }
 
 // Pre-scan input to build alias → table name map.
@@ -341,6 +477,7 @@ build_alias_map(const std::string& input) {
                     lex.next();
                     map[alias.text] = table.text;
                 }
+                parse_on_using(lex, true, nullptr); // skip past ON/USING
             }
             continue;
         }
@@ -369,8 +506,9 @@ build_alias_map(const std::string& input) {
 
 class Parser {
 public:
-    Parser(Lexer& lex, std::unordered_map<std::string, std::string> alias_map)
-        : lex_(lex), alias_map_(std::move(alias_map)) {}
+    Parser(Lexer& lex, std::unordered_map<std::string, std::string> alias_map,
+           Backend backend = Backend::sqlite)
+        : lex_(lex), alias_map_(std::move(alias_map)), backend_(backend) {}
 
     SqlParts parse_document() {
         return parse_sql_parts(/*stop_comma=*/false,
@@ -488,6 +626,7 @@ private:
         std::string accum;
         size_t last_end = 0; // src position after last consumed raw token
         bool has_raw = false;
+        std::vector<size_t> accum_paren_starts; // stack of '(' positions in accum
 
         auto flush = [&]() {
             if (!accum.empty()) {
@@ -719,7 +858,10 @@ private:
                             lex_.next(); // consume alias
                             alias = next.text;
                         }
-                        jp->steps.push_back({forward, table_tok.text, alias});
+                        std::vector<std::pair<std::string,std::string>> columns;
+                        parse_on_using(lex_, forward, &columns);
+                        jp->steps.push_back({forward, table_tok.text, alias,
+                                             std::move(columns)});
                     }
                     flush_before(alias_tok);
                     parts.push_back(std::move(jp));
@@ -730,9 +872,28 @@ private:
                 lex_.restore(st);
             }
 
-            // Accumulate raw SQL token
-            Token tok = lex_.next();
-            accum_token(tok);
+            // Accumulate raw SQL token, with JSON path detection on ')'
+            if (t.type == TokenType::LParen) {
+                Token tok = lex_.next();
+                // Record position in accum where '(' will be appended
+                size_t pos = accum.size();
+                if (has_raw && last_end < tok.src_begin) ++pos; // space will be added
+                else if (need_space && last_end < tok.src_begin) ++pos;
+                accum_paren_starts.push_back(pos);
+                accum_token(tok);
+            } else if (t.type == TokenType::RParen) {
+                Token tok = lex_.next();
+                accum_token(tok);
+                if (!accum_paren_starts.empty()) {
+                    size_t start = accum_paren_starts.back();
+                    accum_paren_starts.pop_back();
+                    if (try_transform_json_path(accum, start))
+                        last_end = lex_.offset();
+                }
+            } else {
+                Token tok = lex_.next();
+                accum_token(tok);
+            }
         }
 
         flush();
@@ -866,8 +1027,131 @@ private:
         return arr;
     }
 
+    // Check if '(' at position start in accum is a JSON path base
+    // (not a function call). A function call has an identifier (not a SQL
+    // keyword) immediately before '('. SQL keywords like WHERE, AND, SELECT
+    // can precede parenthesized JSON path bases.
+    static bool can_be_json_path_base(const std::string& accum, size_t start) {
+        if (start == 0) return true;
+        size_t i = start;
+        // Skip trailing spaces
+        while (i > 0 && accum[i - 1] == ' ') --i;
+        if (i == 0) return true;
+        char c = accum[i - 1];
+        if (c == ')') return false; // nested parens = function-like
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
+            return true; // operator, comma, etc. — not a function call
+        // Extract the preceding word
+        size_t end = i;
+        while (i > 0 && (std::isalnum(static_cast<unsigned char>(accum[i - 1])) ||
+                         accum[i - 1] == '_'))
+            --i;
+        std::string word = accum.substr(i, end - i);
+        // SQL keywords can precede a path base; bare identifiers are function calls
+        return is_sql_keyword(word);
+    }
+
+    // After accumulating ')' at the end of accum, check if the paren group
+    // starting at `start` is followed by .ident or [number] path segments.
+    // If so, transform it into json_extract() / jsonb_extract_path() in place.
+    // Returns true if a transformation was applied (tokens consumed from lexer).
+    bool try_transform_json_path(std::string& accum, size_t start) {
+        if (!can_be_json_path_base(accum, start)) return false;
+
+        // Peek ahead for .ident or [
+        Token next = lex_.peek();
+        bool has_dot = (next.type == TokenType::Other && next.text == ".");
+        bool has_bracket = (next.type == TokenType::LBracket);
+        if (!has_dot && !has_bracket) return false;
+
+        // If dot, check it's followed by an ident (not a number or operator)
+        if (has_dot) {
+            auto st = lex_.save();
+            lex_.next(); // consume .
+            Token after_dot = lex_.peek();
+            lex_.restore(st);
+            if (after_dot.type != TokenType::Ident) return false;
+        }
+
+        // Extract base expression (everything inside parens, excluding parens)
+        std::string base = accum.substr(start + 1, accum.size() - start - 2);
+        accum.resize(start);
+
+        // Parse path segments
+        struct PathSeg {
+            bool is_field; // true = .ident, false = [number]
+            std::string value;
+        };
+        std::vector<PathSeg> segs;
+
+        while (true) {
+            Token t = lex_.peek();
+            if (t.type == TokenType::Other && t.text == ".") {
+                auto st = lex_.save();
+                lex_.next(); // consume .
+                Token ident = lex_.peek();
+                if (ident.type != TokenType::Ident) {
+                    lex_.restore(st);
+                    break;
+                }
+                lex_.next(); // consume ident
+                segs.push_back({true, ident.text});
+            } else if (t.type == TokenType::LBracket) {
+                lex_.next(); // consume [
+                Token idx = lex_.peek();
+                if (idx.type != TokenType::Number)
+                    lex_.error("expected array index", idx.line, idx.col);
+                lex_.next(); // consume number
+                Token rb = lex_.peek();
+                if (rb.type != TokenType::RBracket)
+                    lex_.error("expected ']'", rb.line, rb.col);
+                lex_.next(); // consume ]
+                segs.push_back({false, idx.text});
+            } else {
+                break;
+            }
+        }
+
+        if (segs.empty()) {
+            // No segments parsed — restore the parens
+            accum += "(";
+            accum += base;
+            accum += ")";
+            return false;
+        }
+
+        // Render json_extract / jsonb_extract_path
+        if (backend_ == Backend::postgres) {
+            accum += "jsonb_extract_path(";
+            accum += base;
+            for (const auto& seg : segs) {
+                accum += ", '";
+                accum += seg.value;
+                accum += "'";
+            }
+            accum += ")";
+        } else {
+            accum += "json_extract(";
+            accum += base;
+            accum += ", '$";
+            for (const auto& seg : segs) {
+                if (seg.is_field) {
+                    accum += ".";
+                    accum += seg.value;
+                } else {
+                    accum += "[";
+                    accum += seg.value;
+                    accum += "]";
+                }
+            }
+            accum += "')";
+        }
+        return true;
+    }
+
     Lexer& lex_;
     std::unordered_map<std::string, std::string> alias_map_;
+    Backend backend_;
 };
 
 // ── Renderer ────────────────────────────────────────────────────────
@@ -928,8 +1212,22 @@ resolve_fk_columns(const std::string& child_table,
 
 class Renderer {
 public:
-    explicit Renderer(const FkIndex* fk_index = nullptr)
-        : fk_index_(fk_index) {}
+    explicit Renderer(const FkIndex* fk_index = nullptr,
+                      Backend backend = Backend::sqlite)
+        : fk_index_(fk_index) {
+        switch (backend) {
+        case Backend::postgres:
+            fn_object_      = "jsonb_build_object";
+            fn_array_       = "jsonb_build_array";
+            fn_group_array_ = "jsonb_agg";
+            break;
+        default:
+            fn_object_      = "json_object";
+            fn_array_       = "json_array";
+            fn_group_array_ = "json_group_array";
+            break;
+        }
+    }
 
     std::string render_document(const SqlParts& parts) {
         std::string out;
@@ -977,18 +1275,18 @@ private:
         bool is_object = std::holds_alternative<ObjectLiteral>(ds.projection);
         bool use_group = nested && !ds.singular;
 
-        if (use_group) out += "json_group_array(";
+        if (use_group) { out += fn_group_array_; out += "("; }
 
         if (is_object) {
             render_object(std::get<ObjectLiteral>(ds.projection), out);
         } else {
             const auto& arr = std::get<ArrayLiteral>(ds.projection);
             if (arr.elements.size() == 1) {
-                if (!nested && !ds.singular) out += "json_group_array(";
+                if (!nested && !ds.singular) { out += fn_group_array_; out += "("; }
                 render_parts(arr.elements[0], out, /*nested=*/true);
                 if (!nested && !ds.singular) out += ")";
             } else {
-                if (!nested && !ds.singular) out += "json_group_array(";
+                if (!nested && !ds.singular) { out += fn_group_array_; out += "("; }
                 render_array(arr, out);
                 if (!nested && !ds.singular) out += ")";
             }
@@ -1007,7 +1305,8 @@ private:
     }
 
     void render_object(const ObjectLiteral& obj, std::string& out) {
-        out += "json_object(";
+        out += fn_object_;
+        out += "(";
         for (size_t i = 0; i < obj.fields.size(); ++i) {
             if (i > 0) out += ", ";
             const auto& f = obj.fields[i];
@@ -1024,7 +1323,8 @@ private:
     }
 
     void render_array(const ArrayLiteral& arr, std::string& out) {
-        out += "json_array(";
+        out += fn_array_;
+        out += "(";
         for (size_t i = 0; i < arr.elements.size(); ++i) {
             if (i > 0) out += ", ";
             render_parts(arr.elements[i], out, /*nested=*/true);
@@ -1070,11 +1370,15 @@ private:
             out += " ON ";
             if (step.forward) {
                 // curr is child of prev
-                auto cols = resolve_fk_columns(step.table, prev_table, fk_index_);
+                auto cols = step.columns.empty()
+                    ? resolve_fk_columns(step.table, prev_table, fk_index_)
+                    : step.columns;
                 emit_join_condition(cols, step_ref, prev_ref, out);
             } else {
                 // prev is child of curr
-                auto cols = resolve_fk_columns(prev_table, step.table, fk_index_);
+                auto cols = step.columns.empty()
+                    ? resolve_fk_columns(prev_table, step.table, fk_index_)
+                    : step.columns;
                 emit_join_condition(cols, prev_ref, step_ref, out);
             }
             prev_table = step.table;
@@ -1084,15 +1388,22 @@ private:
         // WHERE: correlate step 1 to start alias
         out += " WHERE ";
         if (s1.forward) {
-            auto cols = resolve_fk_columns(s1.table, jp.start_table, fk_index_);
+            auto cols = s1.columns.empty()
+                ? resolve_fk_columns(s1.table, jp.start_table, fk_index_)
+                : s1.columns;
             emit_join_condition(cols, s1_ref, jp.start_alias, out);
         } else {
-            auto cols = resolve_fk_columns(jp.start_table, s1.table, fk_index_);
+            auto cols = s1.columns.empty()
+                ? resolve_fk_columns(jp.start_table, s1.table, fk_index_)
+                : s1.columns;
             emit_join_condition(cols, jp.start_alias, s1_ref, out);
         }
     }
 
     const FkIndex* fk_index_;
+    const char* fn_object_;
+    const char* fn_array_;
+    const char* fn_group_array_;
 };
 
 } // anonymous namespace
@@ -1119,4 +1430,128 @@ std::string transpile(const std::string& input,
     return renderer.render_document(doc);
 }
 
+std::string transpile(const std::string& input, Backend backend) {
+    auto alias_map = build_alias_map(input);
+    Lexer lex(input);
+    Parser parser(lex, std::move(alias_map), backend);
+    SqlParts doc = parser.parse_document();
+    Renderer renderer(nullptr, backend);
+    return renderer.render_document(doc);
+}
+
+std::string transpile(const std::string& input,
+                      const std::vector<ForeignKey>& foreign_keys,
+                      Backend backend) {
+    auto alias_map = build_alias_map(input);
+    Lexer lex(input);
+    Parser parser(lex, std::move(alias_map), backend);
+    SqlParts doc = parser.parse_document();
+    auto fk_idx = build_fk_index(foreign_keys);
+    Renderer renderer(&fk_idx, backend);
+    return renderer.render_document(doc);
+}
+
 } // namespace sqldeep
+
+// ── C API bridge ────────────────────────────────────────────────────
+
+namespace {
+
+// Duplicate a std::string to a malloc'd C string (caller frees with sqldeep_free).
+char* dup_str(const std::string& s) {
+    char* p = static_cast<char*>(std::malloc(s.size() + 1));
+    if (p) std::memcpy(p, s.c_str(), s.size() + 1);
+    return p;
+}
+
+// Set error output pointers. msg is malloc'd; caller frees with sqldeep_free.
+void set_error(char** err_msg, int* err_line, int* err_col,
+               const sqldeep::Error& e) {
+    if (err_msg)  *err_msg = dup_str(e.what());
+    if (err_line) *err_line = e.line();
+    if (err_col)  *err_col = e.col();
+}
+
+void clear_error(char** err_msg, int* err_line, int* err_col) {
+    if (err_msg)  *err_msg = nullptr;
+    if (err_line) *err_line = 0;
+    if (err_col)  *err_col = 0;
+}
+
+sqldeep::Backend to_backend(sqldeep_backend b) {
+    return b == SQLDEEP_POSTGRES ? sqldeep::Backend::postgres
+                                 : sqldeep::Backend::sqlite;
+}
+
+std::vector<sqldeep::ForeignKey> to_cpp_fks(const sqldeep_foreign_key* fks,
+                                             int fk_count) {
+    std::vector<sqldeep::ForeignKey> cpp_fks;
+    cpp_fks.reserve(fk_count);
+    for (int i = 0; i < fk_count; ++i) {
+        sqldeep::ForeignKey fk;
+        fk.from_table = fks[i].from_table;
+        fk.to_table   = fks[i].to_table;
+        fk.columns.reserve(fks[i].column_count);
+        for (int j = 0; j < fks[i].column_count; ++j) {
+            fk.columns.push_back({
+                fks[i].columns[j].from_column,
+                fks[i].columns[j].to_column,
+            });
+        }
+        cpp_fks.push_back(std::move(fk));
+    }
+    return cpp_fks;
+}
+
+} // namespace
+
+extern "C" {
+
+char* sqldeep_transpile(const char* input,
+                        char** err_msg, int* err_line, int* err_col) {
+    return sqldeep_transpile_backend(input, SQLDEEP_SQLITE,
+                                     err_msg, err_line, err_col);
+}
+
+char* sqldeep_transpile_fk(const char* input,
+                           const sqldeep_foreign_key* fks, int fk_count,
+                           char** err_msg, int* err_line, int* err_col) {
+    return sqldeep_transpile_fk_backend(input, SQLDEEP_SQLITE, fks, fk_count,
+                                        err_msg, err_line, err_col);
+}
+
+char* sqldeep_transpile_backend(const char* input,
+                                sqldeep_backend backend,
+                                char** err_msg, int* err_line, int* err_col) {
+    clear_error(err_msg, err_line, err_col);
+    try {
+        return dup_str(sqldeep::transpile(input, to_backend(backend)));
+    } catch (const sqldeep::Error& e) {
+        set_error(err_msg, err_line, err_col, e);
+        return nullptr;
+    }
+}
+
+char* sqldeep_transpile_fk_backend(const char* input,
+                                   sqldeep_backend backend,
+                                   const sqldeep_foreign_key* fks, int fk_count,
+                                   char** err_msg, int* err_line, int* err_col) {
+    clear_error(err_msg, err_line, err_col);
+    try {
+        auto cpp_fks = to_cpp_fks(fks, fk_count);
+        return dup_str(sqldeep::transpile(input, cpp_fks, to_backend(backend)));
+    } catch (const sqldeep::Error& e) {
+        set_error(err_msg, err_line, err_col, e);
+        return nullptr;
+    }
+}
+
+const char* sqldeep_version(void) {
+    return SQLDEEP_VERSION;
+}
+
+void sqldeep_free(void* ptr) {
+    std::free(ptr);
+}
+
+} // extern "C"

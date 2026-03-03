@@ -4,7 +4,10 @@ cxx = c++ -std=c++20
 cxxflags = -Wall -Wextra -Wpedantic
 
 vendor   = vendor
-incflags = -I. -I$vendor/include
+incflags = -I. -Idist -I$vendor/include
+
+# ── Static library ───────────────────────────────────────────────
+lib = build/libsqldeep.a
 
 # ── Sources ──────────────────────────────────────────────────────────
 test_srcs = tests/doctest_main.cpp $[wildcard tests/test_*.cpp]
@@ -13,6 +16,8 @@ test_objs = $[patsubst %.cpp,build/%.o,$test_srcs]
 # ── Tasks ────────────────────────────────────────────────────────────
 !test: build/sqldeep_tests
     ./$input
+
+!lib: $lib
 
 !example: build/demo
     ./$input
@@ -28,8 +33,11 @@ build/sqldeep_tests: $test_objs build/sqldeep.o build/sqlite3.o
 build/demo: build/examples/demo.o build/sqldeep.o
     $cxx $cxxflags -o $target $inputs
 
+$lib: build/sqldeep.o
+    ar rcs $target $inputs
+
 # ── Compilation rules ────────────────────────────────────────────────
-build/sqldeep.o: sqldeep.cpp
+build/sqldeep.o: dist/sqldeep.cpp dist/sqldeep.h
     $cxx $cxxflags $incflags -c $input -o $target
 
 build/sqlite3.o: $vendor/src/sqlite3.c
