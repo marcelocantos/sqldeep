@@ -446,6 +446,56 @@ convention:
     expected: "SELECT json_object('name', name, 'items', (SELECT json_group_array(json_object('name', name)) FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.cust_id = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('name', name, 'items', (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.cust_id = c.id)) FROM customers c"
 
+  # JSON path extraction: (expr).field[n]
+  - name: json path simple field
+    input: "SELECT { name: (data).name } FROM t"
+    expected: "SELECT json_object('name', json_extract(data, '$.name')) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('name', jsonb_extract_path(data, 'name')) FROM t"
+
+  - name: json path nested
+    input: "SELECT { city: (data).address.city } FROM t"
+    expected: "SELECT json_object('city', json_extract(data, '$.address.city')) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('city', jsonb_extract_path(data, 'address', 'city')) FROM t"
+
+  - name: json path qualified column
+    input: "SELECT { name: (t.data).name } FROM t"
+    expected: "SELECT json_object('name', json_extract(t.data, '$.name')) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('name', jsonb_extract_path(t.data, 'name')) FROM t"
+
+  - name: json path array index
+    input: "SELECT { first: (data).items[0] } FROM t"
+    expected: "SELECT json_object('first', json_extract(data, '$.items[0]')) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('first', jsonb_extract_path(data, 'items', '0')) FROM t"
+
+  - name: json path mixed
+    input: "SELECT { name: (data).items[2].name } FROM t"
+    expected: "SELECT json_object('name', json_extract(data, '$.items[2].name')) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('name', jsonb_extract_path(data, 'items', '2', 'name')) FROM t"
+
+  - name: json path function base
+    input: "SELECT { name: (coalesce(a, b)).name } FROM t"
+    expected: "SELECT json_object('name', json_extract(coalesce(a, b), '$.name')) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('name', jsonb_extract_path(coalesce(a, b), 'name')) FROM t"
+
+  - name: json path in WHERE
+    input: "SELECT * FROM t WHERE (data).type = 'foo'"
+    expected: "SELECT * FROM t WHERE json_extract(data, '$.type') = 'foo'"
+    expected_postgres: "SELECT * FROM t WHERE jsonb_extract_path(data, 'type') = 'foo'"
+
+  - name: json path inside function
+    input: "SELECT upper((data).name) FROM t"
+    expected: "SELECT upper(json_extract(data, '$.name')) FROM t"
+    expected_postgres: "SELECT upper(jsonb_extract_path(data, 'name')) FROM t"
+
+  - name: json path array index only
+    input: "SELECT (data)[0] FROM t"
+    expected: "SELECT json_extract(data, '$[0]') FROM t"
+    expected_postgres: "SELECT jsonb_extract_path(data, '0') FROM t"
+
+  - name: json path no transform on plain parens
+    input: "SELECT (x + 1) FROM t"
+    expected: "SELECT (x + 1) FROM t"
+
 # ── FK-guided join resolution ────────────────────────────────────────
 
 fk:
@@ -547,6 +597,12 @@ errors:
 
   - name: using empty parens
     input: "SELECT { orders: SELECT { id } FROM c->orders USING () } FROM customers c"
+
+  - name: json path expected array index
+    input: "SELECT (data)[x] FROM t"
+
+  - name: json path expected closing bracket
+    input: "SELECT (data)[0 FROM t"
 
 # ── FK-guided error cases ────────────────────────────────────────────
 
