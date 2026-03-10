@@ -34,5 +34,5 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-03-11 — /release v0.6.0
 
-- **Commit**: (pending)
+- **Commit**: `b84c667`
 - **Outcome**: Released v0.6.0. Added aggregate field syntax (`field: SELECT expr` / `SELECT/1 expr` inside object literals for GROUP BY projections), computed keys (`(expr): value` for dynamic JSON key names). Fixed partial float lexing and replaced `assert()` with proper error reporting. All 298 assertions pass (42 test cases).
