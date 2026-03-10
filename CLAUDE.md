@@ -83,6 +83,8 @@ is standard and works unchanged across backends.
 - `FROM ... SELECT/1 { fields }` → same output (FROM-first alternative)
 - Nested `SELECT/1 { ... }` → `(SELECT json_object(...) FROM ... LIMIT 1)` (returns object or null)
 - `FROM ... SELECT expr` → `SELECT expr FROM ...` (plain rearrangement, no JSON wrapping)
+- `field: SELECT expr` (inside `{ }`, no FROM) → `'field', json_group_array(expr)` (aggregate over current GROUP BY scope)
+- `field: SELECT/1 expr` (inside `{ }`, no FROM) → `'field', expr` (singular: no array wrapping)
 - `[expr, ...]` → `json_array(...)`
 - `{ fields }` → `json_object(...)` (inline)
 - Bare field: `id,` → `'id', id`

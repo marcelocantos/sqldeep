@@ -264,6 +264,7 @@ struct ObjectLiteral {
     struct Field {
         std::string key;
         SqlParts value; // empty = bare field
+        bool aggregate = false; // SELECT expr (no FROM) → json_group_array(expr)
     };
     std::vector<Field> fields;
 };
@@ -982,6 +983,31 @@ private:
         Token t = lex_.peek();
         if (t.type == TokenType::Colon) {
             lex_.next();
+
+            // Check for SELECT expr (no FROM) → aggregate field
+            Token t2 = lex_.peek();
+            if (is_keyword(t2, "SELECT")) {
+                auto st = lex_.save();
+                lex_.next(); // consume SELECT
+                bool singular = try_consume_singular();
+                Token t3 = lex_.peek();
+                if (t3.type != TokenType::LBrace && t3.type != TokenType::LBracket) {
+                    // SELECT expr (no { or [) — aggregate over current group
+                    field.aggregate = !singular;
+                    field.value = parse_sql_parts(/*stop_comma=*/true,
+                                                  /*stop_rbrace=*/true,
+                                                  /*stop_rbracket=*/false,
+                                                  /*stop_rparen=*/false,
+                                                  depth);
+                    if (field.value.empty())
+                        lex_.error("expected expression after 'SELECT'",
+                                   t2.line, t2.col);
+                    return field;
+                }
+                // SELECT {/[ — restore and fall through to normal parsing
+                lex_.restore(st);
+            }
+
             field.value = parse_sql_parts(/*stop_comma=*/true,
                                           /*stop_rbrace=*/true,
                                           /*stop_rbracket=*/false,
@@ -1315,6 +1341,11 @@ private:
             out += "', ";
             if (f.value.empty()) {
                 out += f.key;
+            } else if (f.aggregate) {
+                out += fn_group_array_;
+                out += "(";
+                render_parts(f.value, out, /*nested=*/true);
+                out += ")";
             } else {
                 render_parts(f.value, out, /*nested=*/true);
             }

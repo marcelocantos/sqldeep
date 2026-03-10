@@ -395,6 +395,35 @@ convention:
     expected: "SELECT json_object('id', id) FROM t WHERE x = (SELECT json_object('y', y) FROM t2 LIMIT 1)"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE x = (SELECT jsonb_build_object('y', y) FROM t2 LIMIT 1)"
 
+  # Aggregate field (SELECT expr inside { }, no FROM)
+  - name: aggregate field simple
+    input: |-
+      SELECT { acct_sig, customers: SELECT customer_id } FROM t GROUP BY acct_sig
+    expected: "SELECT json_object('acct_sig', acct_sig, 'customers', json_group_array(customer_id)) FROM t GROUP BY acct_sig"
+    expected_postgres: "SELECT jsonb_build_object('acct_sig', acct_sig, 'customers', jsonb_agg(customer_id)) FROM t GROUP BY acct_sig"
+
+  - name: aggregate field with expression
+    input: |-
+      SELECT { key, vals: SELECT a || b } FROM t GROUP BY key
+    expected: "SELECT json_object('key', key, 'vals', json_group_array(a || b)) FROM t GROUP BY key"
+    expected_postgres: "SELECT jsonb_build_object('key', key, 'vals', jsonb_agg(a || b)) FROM t GROUP BY key"
+
+  - name: aggregate field singular skips wrapping
+    input: |-
+      SELECT { key, val: SELECT/1 x } FROM t GROUP BY key
+    expected: "SELECT json_object('key', key, 'val', x) FROM t GROUP BY key"
+    expected_postgres: "SELECT jsonb_build_object('key', key, 'val', x) FROM t GROUP BY key"
+
+  - name: aggregate field mixed with nested subquery
+    input: |-
+      SELECT {
+          acct_sig,
+          customers: SELECT customer_id,
+          orders: SELECT { total } FROM c->orders o,
+      } FROM customers c GROUP BY acct_sig
+    expected: "SELECT json_object('acct_sig', acct_sig, 'customers', json_group_array(customer_id), 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.customers_id = c.customers_id)) FROM customers c GROUP BY acct_sig"
+    expected_postgres: "SELECT jsonb_build_object('acct_sig', acct_sig, 'customers', jsonb_agg(customer_id), 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.customers_id = c.customers_id)) FROM customers c GROUP BY acct_sig"
+
   # ON / USING clauses on join paths
   - name: on shorthand single column
     input: "SELECT { customers_id, orders: SELECT { orders_id } FROM c->orders ON person_id } FROM customers c"
