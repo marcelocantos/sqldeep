@@ -55,9 +55,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "0.5.0"
+SQLDEEP_VERSION       // "0.6.0"
 SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 5
+SQLDEEP_VERSION_MINOR // 6
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```
@@ -87,6 +87,9 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 | Bare | `id,` | `'id', id` |
 | Renamed | `order_id: id` | `'order_id', id` |
 | Quoted key | `"order id": id` | `'order id', id` |
+| Computed key | `(expr): val` | `expr, val` |
+| Aggregate | `field: SELECT expr` | `'field', json_group_array(expr)` |
+| Singular aggregate | `field: SELECT/1 expr` | `'field', expr` |
 
 - Join paths:
   - `->` (one-to-many): `FROM c->orders o` → `FROM orders o WHERE o.customers_id = c.customers_id`
@@ -229,6 +232,27 @@ FROM customers c SELECT {
 FROM events SELECT { type: (data).event_type }
 // SQLite:      → json_extract(data, '$.event_type')
 // PostgreSQL:  → jsonb_extract_path(data, 'event_type')
+```
+
+### Aggregate fields (GROUP BY projection)
+
+```
+FROM t GROUP BY grp SELECT {
+    grp,
+    names: SELECT name,
+    total: SELECT/1 sum(val),
+}
+// → json_object('grp', grp, 'names', json_group_array(name), 'total', sum(val))
+```
+
+`SELECT expr` (no FROM) wraps in `json_group_array()`; `SELECT/1 expr` emits
+the expression directly (useful for aggregate functions like `sum`/`count`).
+
+### Computed keys (dynamic JSON key names)
+
+```
+FROM t SELECT { (tag): score }
+// → json_object(tag, score) — key is the runtime value of `tag`
 ```
 
 ### SELECT-first (also supported)
