@@ -31,3 +31,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `5db977c`
 - **Outcome**: Released v0.5.0. Added PostgreSQL backend support (`jsonb_build_object`, `jsonb_build_array`, `jsonb_agg`, `jsonb_extract_path`), ON/USING override clauses for join paths, JSON path extraction (`(expr).path`), shared YAML test data, Go bindings, and moved dist files to `dist/`. Updated agent guide with ON/USING and JSON path docs. All 260 assertions pass (36 test cases).
+
+## 2026-03-11 — /release v0.6.0
+
+- **Commit**: (pending)
+- **Outcome**: Released v0.6.0. Added aggregate field syntax (`field: SELECT expr` / `SELECT/1 expr` inside object literals for GROUP BY projections), computed keys (`(expr): value` for dynamic JSON key names). Fixed partial float lexing and replaced `assert()` with proper error reporting. All 298 assertions pass (42 test cases).

@@ -624,6 +624,135 @@ TEST_CASE("sqlite: singular returns null for zero rows") {
     CHECK(rows[0] == R"({"orders_id":10,"vendor":null})");
 }
 
+// ── Aggregate field (SELECT expr, no FROM) ──────────────────────────
+
+TEST_CASE("sqlite: aggregate field collects group values") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE custacct(customer_id INTEGER, account_id INTEGER);
+        INSERT INTO custacct VALUES(1, 100);
+        INSERT INTO custacct VALUES(1, 200);
+        INSERT INTO custacct VALUES(2, 100);
+        INSERT INTO custacct VALUES(2, 200);
+        INSERT INTO custacct VALUES(3, 300);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM (
+            FROM custacct a GROUP BY a.customer_id
+            SELECT a.customer_id,
+                (SELECT group_concat(account_id)
+                 FROM (SELECT account_id FROM custacct b
+                       WHERE b.customer_id = a.customer_id
+                       ORDER BY account_id)) AS acct_sig
+        ) c
+        GROUP BY c.acct_sig HAVING count(*) > 1
+        SELECT {
+            accounts: c.acct_sig,
+            customers: SELECT c.customer_id,
+        }
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"accounts":"100,200","customers":[1,2]})");
+}
+
+TEST_CASE("sqlite: aggregate field singular returns last value") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(grp TEXT, val INTEGER);
+        INSERT INTO t VALUES('a', 1);
+        INSERT INTO t VALUES('a', 2);
+        INSERT INTO t VALUES('b', 3);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM t GROUP BY grp ORDER BY grp
+        SELECT {
+            grp,
+            total: SELECT/1 sum(val),
+        }
+    )");
+
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0] == R"({"grp":"a","total":3})");
+    CHECK(rows[1] == R"({"grp":"b","total":3})");
+}
+
+TEST_CASE("sqlite: aggregate field multiple in one object") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(grp TEXT, name TEXT, val INTEGER);
+        INSERT INTO t VALUES('x', 'alice', 10);
+        INSERT INTO t VALUES('x', 'bob', 20);
+        INSERT INTO t VALUES('y', 'carol', 30);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM t GROUP BY grp ORDER BY grp
+        SELECT {
+            grp,
+            names: SELECT name,
+            total: SELECT/1 sum(val),
+        }
+    )");
+
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0] == R"({"grp":"x","names":["alice","bob"],"total":30})");
+    CHECK(rows[1] == R"({"grp":"y","names":["carol"],"total":30})");
+}
+
+TEST_CASE("sqlite: aggregate field with function expression") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(grp TEXT, name TEXT);
+        INSERT INTO t VALUES('a', 'hello');
+        INSERT INTO t VALUES('a', 'world');
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM t WHERE grp = 'a' GROUP BY grp
+        SELECT { grp, labels: SELECT upper(name) }
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"grp":"a","labels":["HELLO","WORLD"]})");
+}
+
+// ── Computed keys ────────────────────────────────────────────────────
+
+TEST_CASE("sqlite: computed key builds dynamic JSON keys") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(k TEXT, v INTEGER);
+        INSERT INTO t VALUES('x', 1);
+        INSERT INTO t VALUES('y', 2);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT { ('key_' || k): v } FROM t ORDER BY k
+    )");
+
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0] == R"({"key_x":1})");
+    CHECK(rows[1] == R"({"key_y":2})");
+}
+
+TEST_CASE("sqlite: computed key mixed with static keys") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(tag TEXT, name TEXT, score INTEGER);
+        INSERT INTO t VALUES('rank', 'alice', 10);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT { name, (tag): score } FROM t
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"name":"alice","rank":10})");
+}
+
 // ── Plain FROM-first ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: plain from-first") {

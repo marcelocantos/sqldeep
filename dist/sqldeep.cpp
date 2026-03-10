@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "sqldeep.h"
 
-#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -213,8 +212,15 @@ private:
 
     Token lex_number(int tline, int tcol, size_t begin) {
         std::string s;
-        while (pos_ < src_.size() && (is_digit(src_[pos_]) || src_[pos_] == '.')) {
+        while (pos_ < src_.size() && is_digit(src_[pos_])) {
             s += src_[pos_]; advance();
+        }
+        if (pos_ < src_.size() && src_[pos_] == '.' &&
+            pos_ + 1 < src_.size() && is_digit(src_[pos_ + 1])) {
+            s += src_[pos_]; advance(); // '.'
+            while (pos_ < src_.size() && is_digit(src_[pos_])) {
+                s += src_[pos_]; advance();
+            }
         }
         if (pos_ < src_.size() && (src_[pos_] == 'e' || src_[pos_] == 'E')) {
             s += src_[pos_]; advance();
@@ -263,7 +269,9 @@ using SqlParts = std::vector<SqlPart>;
 struct ObjectLiteral {
     struct Field {
         std::string key;
+        SqlParts computed_key; // non-empty = (expr) computed key
         SqlParts value; // empty = bare field
+        bool aggregate = false; // SELECT expr (no FROM) → json_group_array(expr)
     };
     std::vector<Field> fields;
 };
@@ -929,7 +937,8 @@ private:
 
     std::unique_ptr<ObjectLiteral> parse_object_literal(int depth) {
         Token lbrace = lex_.next();
-        assert(lbrace.type == TokenType::LBrace);
+        if (lbrace.type != TokenType::LBrace)
+            lex_.error("expected '{'", lbrace.line, lbrace.col);
         check_depth(depth, lbrace.line, lbrace.col);
 
         auto obj = std::make_unique<ObjectLiteral>();
@@ -956,32 +965,76 @@ private:
     ObjectLiteral::Field parse_field(int depth) {
         ObjectLiteral::Field field;
 
-        Token key = lex_.next();
-        if (key.type == TokenType::Ident) {
-            field.key = key.text;
-        } else if (key.type == TokenType::DqString) {
-            // Strip outer quotes and unescape \" → " and \\ → \.
-            auto raw = key.text.substr(1, key.text.size() - 2);
-            field.key.reserve(raw.size());
-            for (size_t i = 0; i < raw.size(); ++i) {
-                if (raw[i] == '\\' && i + 1 < raw.size() &&
-                    (raw[i + 1] == '"' || raw[i + 1] == '\\')) {
-                    field.key += raw[++i];
-                } else if (raw[i] == '"' && i + 1 < raw.size() && raw[i + 1] == '"') {
-                    field.key += '"';
-                    ++i; // skip doubled quote
-                } else {
-                    field.key += raw[i];
-                }
-            }
+        Token key = lex_.peek();
+        if (key.type == TokenType::LParen) {
+            // Computed key: (expr): value
+            lex_.next(); // consume '('
+            field.computed_key = parse_sql_parts(/*stop_comma=*/false,
+                                                 /*stop_rbrace=*/false,
+                                                 /*stop_rbracket=*/false,
+                                                 /*stop_rparen=*/true,
+                                                 depth);
+            if (field.computed_key.empty())
+                lex_.error("expected expression in computed key", key.line, key.col);
+            Token rparen = lex_.peek();
+            if (rparen.type != TokenType::RParen)
+                lex_.error("expected ')' after computed key", rparen.line, rparen.col);
+            lex_.next(); // consume ')'
         } else {
-            lex_.error("expected field name (identifier or double-quoted string)",
-                       key.line, key.col);
+            key = lex_.next();
+            if (key.type == TokenType::Ident) {
+                field.key = key.text;
+            } else if (key.type == TokenType::DqString) {
+                // Strip outer quotes and unescape \" → " and \\ → \.
+                auto raw = key.text.substr(1, key.text.size() - 2);
+                field.key.reserve(raw.size());
+                for (size_t i = 0; i < raw.size(); ++i) {
+                    if (raw[i] == '\\' && i + 1 < raw.size() &&
+                        (raw[i + 1] == '"' || raw[i + 1] == '\\')) {
+                        field.key += raw[++i];
+                    } else if (raw[i] == '"' && i + 1 < raw.size() && raw[i + 1] == '"') {
+                        field.key += '"';
+                        ++i; // skip doubled quote
+                    } else {
+                        field.key += raw[i];
+                    }
+                }
+            } else {
+                lex_.error("expected field name (identifier, double-quoted string, or computed key)",
+                           key.line, key.col);
+            }
         }
 
         Token t = lex_.peek();
+        if (!field.computed_key.empty() && t.type != TokenType::Colon)
+            lex_.error("expected ':' after computed key", t.line, t.col);
         if (t.type == TokenType::Colon) {
             lex_.next();
+
+            // Check for SELECT expr (no FROM) → aggregate field
+            Token t2 = lex_.peek();
+            if (is_keyword(t2, "SELECT")) {
+                auto st = lex_.save();
+                lex_.next(); // consume SELECT
+                bool singular = try_consume_singular();
+                Token t3 = lex_.peek();
+                if (t3.type != TokenType::LBrace && t3.type != TokenType::LBracket) {
+                    // SELECT expr (no { or [) — aggregate over current group
+                    field.aggregate = !singular;
+                    field.value = parse_sql_parts(/*stop_comma=*/true,
+                                                  /*stop_rbrace=*/true,
+                                                  /*stop_rbracket=*/false,
+                                                  /*stop_rparen=*/false,
+                                                  depth);
+                    if (field.value.empty())
+                        lex_.error("expected expression after 'SELECT'",
+                                   t2.line, t2.col);
+                    return field;
+                }
+                // SELECT {/[ — restore and fall through to normal parsing
+                lex_.restore(st);
+            }
+
             field.value = parse_sql_parts(/*stop_comma=*/true,
                                           /*stop_rbrace=*/true,
                                           /*stop_rbracket=*/false,
@@ -996,7 +1049,8 @@ private:
 
     std::unique_ptr<ArrayLiteral> parse_array_literal(int depth) {
         Token lbracket = lex_.next();
-        assert(lbracket.type == TokenType::LBracket);
+        if (lbracket.type != TokenType::LBracket)
+            lex_.error("expected '['", lbracket.line, lbracket.col);
         check_depth(depth, lbracket.line, lbracket.col);
 
         auto arr = std::make_unique<ArrayLiteral>();
@@ -1310,11 +1364,21 @@ private:
         for (size_t i = 0; i < obj.fields.size(); ++i) {
             if (i > 0) out += ", ";
             const auto& f = obj.fields[i];
-            out += "'";
-            out += sql_escape_key(f.key);
-            out += "', ";
+            if (!f.computed_key.empty()) {
+                render_parts(f.computed_key, out, /*nested=*/true);
+            } else {
+                out += "'";
+                out += sql_escape_key(f.key);
+                out += "'";
+            }
+            out += ", ";
             if (f.value.empty()) {
                 out += f.key;
+            } else if (f.aggregate) {
+                out += fn_group_array_;
+                out += "(";
+                render_parts(f.value, out, /*nested=*/true);
+                out += ")";
             } else {
                 render_parts(f.value, out, /*nested=*/true);
             }

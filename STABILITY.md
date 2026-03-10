@@ -9,7 +9,7 @@ period exists to get the API and syntax right.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.5.0.
+Snapshot as of v0.6.0.
 
 ### C API (`sqldeep.h`)
 
@@ -29,9 +29,9 @@ Snapshot as of v0.5.0.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.5.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.6.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `5` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `6` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
@@ -52,6 +52,9 @@ Snapshot as of v0.5.0.
 | Bare field | `id,` | **Stable** |
 | Renamed field | `order_id: id` | **Stable** |
 | Double-quoted key | `"order id": id` | **Stable** |
+| Computed key | `(expr): value` | **Needs review** |
+| Aggregate field | `field: SELECT expr` (no FROM) | **Needs review** |
+| Singular aggregate field | `field: SELECT/1 expr` (no FROM) | **Needs review** |
 | Forward join (`->`) | `FROM c->orders o` | **Needs review** |
 | Reverse join (`<-`) | `FROM o<-customers c` | **Needs review** |
 | Join path chain | `FROM c->orders o->items i` | **Needs review** |
@@ -73,6 +76,9 @@ Snapshot as of v0.5.0.
 | Array select | `json_group_array(...)` | **Stable** |
 | Singular select | `json_object(...) ... LIMIT 1` (no array wrapping) | **Needs review** |
 | Inline array | `json_array(...)` | **Stable** |
+| Computed key | `expr, value` (key is runtime expression) | **Needs review** |
+| Aggregate field | `json_group_array(expr)` | **Needs review** |
+| Singular aggregate field | `expr` (no array wrapping) | **Needs review** |
 | Forward join | `FROM table WHERE table.parent_id = alias.parent_id` | **Needs review** |
 | Reverse join | `FROM table WHERE alias.table_id = table.table_id` | **Needs review** |
 | Join path chain | `FROM t1 JOIN t2 ON ... WHERE ...` | **Needs review** |
@@ -101,6 +107,12 @@ Before 1.0:
   overload need real-world usage to confirm the API shape is right. Ambiguous FK
   disambiguation (multiple FKs between the same tables) is not yet supported in
   the syntax — users must use explicit WHERE clauses for now.
+- **Aggregate field syntax**: New in v0.6.0. `field: SELECT expr` (no FROM)
+  wraps in `json_group_array()` for GROUP BY aggregation. `SELECT/1` variant
+  skips wrapping. Needs usage feedback.
+- **Computed keys**: New in v0.6.0. `(expr): value` uses a runtime expression
+  as the JSON key. Needs usage feedback to confirm the paren syntax is
+  ergonomic and covers real-world needs.
 - **Error messages**: Error text is not part of the stability contract, but
   should be consistently helpful before 1.0.
 - **Distribution story**: No install target, pkg-config, or CMake find-module.
@@ -114,4 +126,4 @@ Before 1.0:
   `sqldeep_foreign_key`)
 - Multi-statement input (`;`-separated)
 - MySQL output target
-- Aggregate functions beyond `json_group_array` / `jsonb_agg`
+- Custom aggregate functions beyond `json_group_array` / `jsonb_agg`
