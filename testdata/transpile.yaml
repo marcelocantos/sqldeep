@@ -418,6 +418,24 @@ convention:
     expected: "SELECT json_object('key', key, 'val', x) FROM t GROUP BY key"
     expected_postgres: "SELECT jsonb_build_object('key', key, 'val', x) FROM t GROUP BY key"
 
+  - name: aggregate field multiple in one object
+    input: |-
+      SELECT { grp, names: SELECT name, ids: SELECT id } FROM t GROUP BY grp
+    expected: "SELECT json_object('grp', grp, 'names', json_group_array(name), 'ids', json_group_array(id)) FROM t GROUP BY grp"
+    expected_postgres: "SELECT jsonb_build_object('grp', grp, 'names', jsonb_agg(name), 'ids', jsonb_agg(id)) FROM t GROUP BY grp"
+
+  - name: aggregate field with function expression
+    input: |-
+      SELECT { grp, labels: SELECT upper(name) } FROM t GROUP BY grp
+    expected: "SELECT json_object('grp', grp, 'labels', json_group_array(upper(name))) FROM t GROUP BY grp"
+    expected_postgres: "SELECT jsonb_build_object('grp', grp, 'labels', jsonb_agg(upper(name))) FROM t GROUP BY grp"
+
+  - name: aggregate field from-first
+    input: |-
+      FROM t GROUP BY grp SELECT { grp, vals: SELECT x }
+    expected: "SELECT json_object('grp', grp, 'vals', json_group_array(x)) FROM t GROUP BY grp"
+    expected_postgres: "SELECT jsonb_build_object('grp', grp, 'vals', jsonb_agg(x)) FROM t GROUP BY grp"
+
   - name: aggregate field mixed with nested subquery
     input: |-
       SELECT {

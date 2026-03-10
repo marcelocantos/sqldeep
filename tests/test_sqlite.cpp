@@ -679,6 +679,46 @@ TEST_CASE("sqlite: aggregate field singular returns last value") {
     CHECK(rows[1] == R"({"grp":"b","total":3})");
 }
 
+TEST_CASE("sqlite: aggregate field multiple in one object") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(grp TEXT, name TEXT, val INTEGER);
+        INSERT INTO t VALUES('x', 'alice', 10);
+        INSERT INTO t VALUES('x', 'bob', 20);
+        INSERT INTO t VALUES('y', 'carol', 30);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM t GROUP BY grp ORDER BY grp
+        SELECT {
+            grp,
+            names: SELECT name,
+            total: SELECT/1 sum(val),
+        }
+    )");
+
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0] == R"({"grp":"x","names":["alice","bob"],"total":30})");
+    CHECK(rows[1] == R"({"grp":"y","names":["carol"],"total":30})");
+}
+
+TEST_CASE("sqlite: aggregate field with function expression") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(grp TEXT, name TEXT);
+        INSERT INTO t VALUES('a', 'hello');
+        INSERT INTO t VALUES('a', 'world');
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        FROM t WHERE grp = 'a' GROUP BY grp
+        SELECT { grp, labels: SELECT upper(name) }
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"grp":"a","labels":["HELLO","WORLD"]})");
+}
+
 // ── Plain FROM-first ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: plain from-first") {
