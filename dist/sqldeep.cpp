@@ -269,6 +269,7 @@ using SqlParts = std::vector<SqlPart>;
 struct ObjectLiteral {
     struct Field {
         std::string key;
+        SqlParts computed_key; // non-empty = (expr) computed key
         SqlParts value; // empty = bare field
         bool aggregate = false; // SELECT expr (no FROM) → json_group_array(expr)
     };
@@ -964,30 +965,49 @@ private:
     ObjectLiteral::Field parse_field(int depth) {
         ObjectLiteral::Field field;
 
-        Token key = lex_.next();
-        if (key.type == TokenType::Ident) {
-            field.key = key.text;
-        } else if (key.type == TokenType::DqString) {
-            // Strip outer quotes and unescape \" → " and \\ → \.
-            auto raw = key.text.substr(1, key.text.size() - 2);
-            field.key.reserve(raw.size());
-            for (size_t i = 0; i < raw.size(); ++i) {
-                if (raw[i] == '\\' && i + 1 < raw.size() &&
-                    (raw[i + 1] == '"' || raw[i + 1] == '\\')) {
-                    field.key += raw[++i];
-                } else if (raw[i] == '"' && i + 1 < raw.size() && raw[i + 1] == '"') {
-                    field.key += '"';
-                    ++i; // skip doubled quote
-                } else {
-                    field.key += raw[i];
-                }
-            }
+        Token key = lex_.peek();
+        if (key.type == TokenType::LParen) {
+            // Computed key: (expr): value
+            lex_.next(); // consume '('
+            field.computed_key = parse_sql_parts(/*stop_comma=*/false,
+                                                 /*stop_rbrace=*/false,
+                                                 /*stop_rbracket=*/false,
+                                                 /*stop_rparen=*/true,
+                                                 depth);
+            if (field.computed_key.empty())
+                lex_.error("expected expression in computed key", key.line, key.col);
+            Token rparen = lex_.peek();
+            if (rparen.type != TokenType::RParen)
+                lex_.error("expected ')' after computed key", rparen.line, rparen.col);
+            lex_.next(); // consume ')'
         } else {
-            lex_.error("expected field name (identifier or double-quoted string)",
-                       key.line, key.col);
+            key = lex_.next();
+            if (key.type == TokenType::Ident) {
+                field.key = key.text;
+            } else if (key.type == TokenType::DqString) {
+                // Strip outer quotes and unescape \" → " and \\ → \.
+                auto raw = key.text.substr(1, key.text.size() - 2);
+                field.key.reserve(raw.size());
+                for (size_t i = 0; i < raw.size(); ++i) {
+                    if (raw[i] == '\\' && i + 1 < raw.size() &&
+                        (raw[i + 1] == '"' || raw[i + 1] == '\\')) {
+                        field.key += raw[++i];
+                    } else if (raw[i] == '"' && i + 1 < raw.size() && raw[i + 1] == '"') {
+                        field.key += '"';
+                        ++i; // skip doubled quote
+                    } else {
+                        field.key += raw[i];
+                    }
+                }
+            } else {
+                lex_.error("expected field name (identifier, double-quoted string, or computed key)",
+                           key.line, key.col);
+            }
         }
 
         Token t = lex_.peek();
+        if (!field.computed_key.empty() && t.type != TokenType::Colon)
+            lex_.error("expected ':' after computed key", t.line, t.col);
         if (t.type == TokenType::Colon) {
             lex_.next();
 
@@ -1344,9 +1364,14 @@ private:
         for (size_t i = 0; i < obj.fields.size(); ++i) {
             if (i > 0) out += ", ";
             const auto& f = obj.fields[i];
-            out += "'";
-            out += sql_escape_key(f.key);
-            out += "', ";
+            if (!f.computed_key.empty()) {
+                render_parts(f.computed_key, out, /*nested=*/true);
+            } else {
+                out += "'";
+                out += sql_escape_key(f.key);
+                out += "'";
+            }
+            out += ", ";
             if (f.value.empty()) {
                 out += f.key;
             } else if (f.aggregate) {

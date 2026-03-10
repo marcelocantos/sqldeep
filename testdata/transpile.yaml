@@ -446,6 +446,27 @@ convention:
     expected: "SELECT json_object('acct_sig', acct_sig, 'customers', json_group_array(customer_id), 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.customers_id = c.customers_id)) FROM customers c GROUP BY acct_sig"
     expected_postgres: "SELECT jsonb_build_object('acct_sig', acct_sig, 'customers', jsonb_agg(customer_id), 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.customers_id = c.customers_id)) FROM customers c GROUP BY acct_sig"
 
+  # Computed keys
+  - name: computed key simple
+    input: "SELECT { (x): 42 } FROM t"
+    expected: "SELECT json_object(x, 42) FROM t"
+    expected_postgres: "SELECT jsonb_build_object(x, 42) FROM t"
+
+  - name: computed key with expression
+    input: "SELECT { ('key_' || id): val } FROM t"
+    expected: "SELECT json_object('key_' || id, val) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('key_' || id, val) FROM t"
+
+  - name: computed key mixed with static keys
+    input: "SELECT { name, (tag): score } FROM t"
+    expected: "SELECT json_object('name', name, tag, score) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('name', name, tag, score) FROM t"
+
+  - name: computed key with function call
+    input: "SELECT { (lower(k)): v } FROM t"
+    expected: "SELECT json_object(lower(k), v) FROM t"
+    expected_postgres: "SELECT jsonb_build_object(lower(k), v) FROM t"
+
   # ON / USING clauses on join paths
   - name: on shorthand single column
     input: "SELECT { customers_id, orders: SELECT { orders_id } FROM c->orders ON person_id } FROM customers c"

@@ -90,6 +90,7 @@ is standard and works unchanged across backends.
 - Bare field: `id,` → `'id', id`
 - Renamed: `order_id: id` → `'order_id', id`
 - Double-quoted key: `"order id": id` → `'order id', id`
+- Computed key: `(expr): val` → `expr, val` (key is a runtime expression)
 - Forward join: `FROM c->orders o` → `FROM orders o WHERE o.customers_id = c.customers_id`
   (`->` = right table is child, has FK `<left_table>_id`)
 - Reverse join: `FROM o<-customers c` → `FROM customers c WHERE o.customers_id = c.customers_id`

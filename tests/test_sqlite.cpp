@@ -719,6 +719,40 @@ TEST_CASE("sqlite: aggregate field with function expression") {
     CHECK(rows[0] == R"({"grp":"a","labels":["HELLO","WORLD"]})");
 }
 
+// ── Computed keys ────────────────────────────────────────────────────
+
+TEST_CASE("sqlite: computed key builds dynamic JSON keys") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(k TEXT, v INTEGER);
+        INSERT INTO t VALUES('x', 1);
+        INSERT INTO t VALUES('y', 2);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT { ('key_' || k): v } FROM t ORDER BY k
+    )");
+
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0] == R"({"key_x":1})");
+    CHECK(rows[1] == R"({"key_y":2})");
+}
+
+TEST_CASE("sqlite: computed key mixed with static keys") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE t(tag TEXT, name TEXT, score INTEGER);
+        INSERT INTO t VALUES('rank', 'alice', 10);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT { name, (tag): score } FROM t
+    )");
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"name":"alice","rank":10})");
+}
+
 // ── Plain FROM-first ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: plain from-first") {
