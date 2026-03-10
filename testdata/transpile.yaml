@@ -96,6 +96,10 @@ convention:
     input: "SELECT id, name FROM t WHERE x > 0"
     expected: "SELECT id, name FROM t WHERE x > 0"
 
+  - name: number with trailing dot not absorbed
+    input: "SELECT 1.0 + 2 FROM t"
+    expected: "SELECT 1.0 + 2 FROM t"
+
   - name: empty input
     input: ""
     expected: ""

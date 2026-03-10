@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "sqldeep.h"
 
-#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -213,8 +212,15 @@ private:
 
     Token lex_number(int tline, int tcol, size_t begin) {
         std::string s;
-        while (pos_ < src_.size() && (is_digit(src_[pos_]) || src_[pos_] == '.')) {
+        while (pos_ < src_.size() && is_digit(src_[pos_])) {
             s += src_[pos_]; advance();
+        }
+        if (pos_ < src_.size() && src_[pos_] == '.' &&
+            pos_ + 1 < src_.size() && is_digit(src_[pos_ + 1])) {
+            s += src_[pos_]; advance(); // '.'
+            while (pos_ < src_.size() && is_digit(src_[pos_])) {
+                s += src_[pos_]; advance();
+            }
         }
         if (pos_ < src_.size() && (src_[pos_] == 'e' || src_[pos_] == 'E')) {
             s += src_[pos_]; advance();
@@ -930,7 +936,8 @@ private:
 
     std::unique_ptr<ObjectLiteral> parse_object_literal(int depth) {
         Token lbrace = lex_.next();
-        assert(lbrace.type == TokenType::LBrace);
+        if (lbrace.type != TokenType::LBrace)
+            lex_.error("expected '{'", lbrace.line, lbrace.col);
         check_depth(depth, lbrace.line, lbrace.col);
 
         auto obj = std::make_unique<ObjectLiteral>();
@@ -1022,7 +1029,8 @@ private:
 
     std::unique_ptr<ArrayLiteral> parse_array_literal(int depth) {
         Token lbracket = lex_.next();
-        assert(lbracket.type == TokenType::LBracket);
+        if (lbracket.type != TokenType::LBracket)
+            lex_.error("expected '['", lbracket.line, lbracket.col);
         check_depth(depth, lbracket.line, lbracket.col);
 
         auto arr = std::make_unique<ArrayLiteral>();
