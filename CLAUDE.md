@@ -157,6 +157,20 @@ mkfile                      Build system (mk)
 Add new tests to `test_transpile.cpp` or create new `test_*.cpp` files for
 focused component testing.
 
+## Versioning and stability
+
+- Semver (vMAJOR.MINOR.PATCH). Breaking changes require a new major version.
+- Stability is tracked **per feature** in `STABILITY.md`, not per release.
+- New features land as **Experimental** — usable but not yet covered by the
+  backwards-compatibility contract. May change in any minor release.
+- Features are promoted to **Stable** after real-world usage confirms the
+  design. Promotion is a one-way door.
+- Stable items are never affected by the addition of Experimental features.
+
+## Delivery
+
+Merged to master.
+
 ## Conventions
 
 - Apache 2.0 license with SPDX headers on all source files.

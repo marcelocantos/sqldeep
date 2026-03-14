@@ -6,6 +6,23 @@ As of v1.0.0, the public API (`dist/sqldeep.h`), input syntax (the DSL), and
 output semantics are a backwards-compatibility contract. Breaking changes
 require a new major version.
 
+### Stability levels
+
+Each item in the catalogue below is marked with one of two levels:
+
+- **Stable** — covered by the backwards-compatibility contract. Will not change
+  in a backwards-incompatible way within the current major version. Removal or
+  breaking changes require a new major version.
+- **Experimental** — available for use but not yet part of the stability
+  contract. May change in syntax, semantics, or output form in any minor
+  release. Experimental items are promoted to Stable once the design is
+  confirmed through real-world usage. Promotion is a one-way door — once
+  Stable, an item cannot revert to Experimental.
+
+New features land as Experimental. Existing Stable items are never affected by
+the addition of Experimental features — the contract is per-item, not
+per-release.
+
 ## Interaction surface catalogue
 
 Snapshot as of v1.0.0.
