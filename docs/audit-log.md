@@ -47,5 +47,5 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-03-15 — /release v0.8.0
 
-- **Commit**: (pending)
+- **Commit**: `44b26a9`
 - **Outcome**: Released v0.8.0. Added recursive tree construction (`RECURSE ON`) with bracket-injection CTE. Fixed Go bindings broken `#include`. Updated README with recursive select docs and comment syntax. All 325 assertions pass (47 test cases).
