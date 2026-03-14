@@ -83,6 +83,9 @@ Snapshot as of v0.7.0 (unreleased).
 | Plain FROM-first select | `FROM t SELECT id, name` | **Stable** |
 | SQL passthrough | `SELECT id FROM t` | **Stable** |
 | SQL `->` / `->>` passthrough | `data->>'name'` in non-FROM context | **Experimental** |
+| Recursive select | `SELECT { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
+| Recursive explicit PK | `RECURSE ON (fk = pk)` | **Experimental** |
+| Recursive singular | `SELECT/1 { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
 
 ### Output semantics
 
@@ -106,6 +109,7 @@ Snapshot as of v0.7.0 (unreleased).
 | FK convention | `<table>_id` column naming | **Stable** |
 | FK-guided join | Uses explicit FK metadata (no convention fallback) | **Stable** |
 | Multi-column FK | AND-joined conditions | **Stable** |
+| Recursive select | `WITH RECURSIVE` 3-CTE bracket-injection template | **Experimental** |
 
 ### Parser behaviour
 
@@ -161,6 +165,10 @@ Before 1.0:
 - **`->>` passthrough settling**: New lexer behaviour in v0.7.0. The lexer
   extends `->` to `->>` when the `>` is touching. Needs usage to confirm
   this heuristic is robust.
+- **Recursive select settling**: New in v0.8.0. `RECURSE ON` syntax, `*`
+  field marker, and bracket-injection CTE output all need real-world usage.
+  Current limitations: top-level only (not nested), integer PKs only,
+  no FROM-first variant, no renamed/computed fields within the recursive shape.
 
 ## Known limitations
 

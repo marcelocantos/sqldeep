@@ -1,6 +1,6 @@
 # Targets
 
-<!-- last-evaluated: d4b1665 -->
+<!-- last-evaluated: 149089b -->
 
 ## Active
 
@@ -15,24 +15,13 @@
   - `sqldeep_version()` returns `"1.0.0"`
   - GitHub issue #10 is closed (resolved by computed key syntax)
   - Tagged release `v1.0.0` exists on GitHub
-- **Context**: v0.7.0 introduced three Experimental items (SQL comments, `->` FROM-context restriction, `->>` passthrough) and a breaking change (removed `//` comments). The settling clock has reset. 1.0 requires these to stabilise through real-world usage before promotion. The C API and all pre-v0.7.0 syntax items are Stable.
+- **Context**: v0.7.0 introduced Experimental items (SQL comments, `->` FROM-context restriction, `->>` passthrough) and a breaking change (removed `//` comments). v0.8.0 adds recursive select (also Experimental). The settling clock requires these features to prove out through real-world usage before promotion to Stable.
 - **Status**: blocked (settling period — need Experimental items to prove out)
 - **Discovered**: 2026-03-12
 
-### 🎯T2 Recursive tree construction from self-referential tables
-- **Weight**: 5 (value 13 / cost 3)
-- **Estimated-cost**: 3
-- **Acceptance**:
-  - `SELECT/1 { id, name, children: * } FROM t RECURSE ON (parent_id) WHERE parent_id IS NULL` produces correct nested JSON tree
-  - SQLite backend emits bracket-injection CTE (proven approach)
-  - PostgreSQL backend emits equivalent
-  - Forest output (multiple roots) wrapped in `[]`
-  - Singular select (`/1`) returns single root tree
-  - Explicit PK supported: `RECURSE ON (parent_id = category_id)`
-  - Integration tests verify actual SQLite execution with 3+ level trees
-  - Transpilation tests for both backends
-- **Context**: Novel feature — no existing query language offers declarative tree construction from flat relational data via comprehension syntax. The `*` marker is a fixed-point annotation; the rewriter emits a mechanical CTE template. Design and SQL template proven working; AST changes started, parser and renderer still needed.
-- **Status**: converging
-- **Discovered**: 2026-03-12
-
 ## Achieved
+
+### 🎯T2 Recursive tree construction from self-referential tables
+- **Achieved**: 2026-03-15 (commit 149089b)
+- **Acceptance**: All criteria met — parser, renderer, both backends, singular/forest modes, explicit PK, integration tests with 3+ levels, transpilation tests. 47 tests, 325 assertions passing.
+- **Discovered**: 2026-03-12

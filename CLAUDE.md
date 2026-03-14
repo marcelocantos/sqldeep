@@ -116,6 +116,10 @@ is standard and works unchanged across backends.
 - FK-guided mode: `transpile(input, foreign_keys)` uses explicit FK metadata
   instead of the naming convention. Supports multi-column FKs. Errors on
   missing or ambiguous FK matches (no convention fallback).
+- Recursive tree: `SELECT/1 { id, name, children: * } FROM t RECURSE ON (parent_id) WHERE parent_id IS NULL`
+  → 3-CTE bracket-injection template producing nested JSON entirely within SQL
+- `RECURSE ON (fk = pk)` for explicit PK column (default: `id`)
+- `SELECT { ..., children: * } FROM t RECURSE ON (fk)` → forest output wrapped in `[]`
 - `--` line comments stripped
 - `/* ... */` block comments stripped (flat, not nested)
 - Trailing commas allowed
@@ -145,15 +149,18 @@ mkfile                      Build system (mk)
   (`(expr).field[n]` — simple, nested, qualified, array index, mixed, function
   base, WHERE clause, inside function, array-only, passthrough, error cases),
   FROM-first variants (deep and plain), singular select (`SELECT/1`) variants,
-  FK-guided joins (forward, reverse, chain, bridge, multi-column, error cases)
+  FK-guided joins (forward, reverse, chain, bridge, multi-column, error cases),
+  recursive select (`RECURSE ON`) variants (basic tree, forest, explicit PK,
+  PostgreSQL backend)
 
 - `test_sqlite.cpp` — integration tests: transpile sqldeep syntax, execute the
   resulting SQL against an in-memory SQLite database, and verify the JSON output.
   Covers single-table queries, two- and three-level nesting, mixed array/object
   nesting, empty subquery results, WHERE clauses, auto-join, reverse join,
   grandchild chain, bridge join (many-to-many), FROM-first variants, singular
-  select (`SELECT/1`), FK-guided joins (single and multi-column), and plain
-  SQL passthrough.
+  select (`SELECT/1`), FK-guided joins (single and multi-column), JSON arrow
+  operators (`->` / `->>`), recursive tree construction (singular, forest,
+  empty), and plain SQL passthrough.
 
 Add new tests to `test_transpile.cpp` or create new `test_*.cpp` files for
 focused component testing.
