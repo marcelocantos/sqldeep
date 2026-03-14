@@ -55,9 +55,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "0.7.0"
+SQLDEEP_VERSION       // "0.8.0"
 SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 7
+SQLDEEP_VERSION_MINOR // 8
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```
@@ -104,6 +104,10 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - JSON path extraction: `(expr).field.sub[n]` → `json_extract(expr, '$.field.sub[n]')` (SQLite)
   / `jsonb_extract_path(expr, 'field', 'sub', 'n')` (PostgreSQL).
   Parentheses around the base expression disambiguate from `table.column`.
+- Recursive tree construction: `SELECT/1 { id, name, children: * } FROM t RECURSE ON (parent_id) WHERE parent_id IS NULL`
+  produces nested JSON trees from self-referential tables. `*` marks the recursion point.
+  `RECURSE ON (fk = pk)` for explicit PK (default: `id`). `SELECT` (no `/1`) produces a forest `[]`.
+  Output is a bracket-injection CTE — no client-side assembly.
 - `--` line comments and `/* ... */` block comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }` or `[ ]` passes through unchanged.

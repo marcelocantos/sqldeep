@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.7.0 (unreleased).
+Snapshot as of v0.8.0.
 
 ### C API (`sqldeep.h`)
 
@@ -44,9 +44,9 @@ Snapshot as of v0.7.0 (unreleased).
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.7.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.8.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `7` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `8` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)

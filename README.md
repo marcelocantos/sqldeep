@@ -129,20 +129,20 @@ When FK metadata is provided (see [FK-guided joins](#fk-guided-joins)), real
 column names are used instead.
 
 ```sql
-// One-to-many: customers → orders (orders has customers_id FK)
+-- One-to-many: customers → orders (orders has customers_id FK)
 FROM c->orders o
 -- → FROM orders o WHERE o.customers_id = c.customers_id
 
-// Many-to-one: orders → customers (orders has customers_id FK)
+-- Many-to-one: orders → customers (orders has customers_id FK)
 FROM o<-customers c
 -- → FROM customers c WHERE o.customers_id = c.customers_id
 
-// Chain: customers → orders → items
+-- Chain: customers → orders → items
 FROM c->orders o->items i
 -- → FROM orders o JOIN items i ON i.orders_id = o.orders_id
 --   WHERE o.customers_id = c.customers_id
 
-// Bridge (many-to-many via junction table)
+-- Bridge (many-to-many via junction table)
 FROM c->custacct<-accounts a
 -- → FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id
 --   WHERE custacct.customers_id = c.customers_id
@@ -162,6 +162,27 @@ char* sql = sqldeep_transpile_fk(input, fks, 1, &err_msg, &err_line, &err_col);
 
 When FK metadata is provided, every join must be resolvable from it — there is
 no fallback to the naming convention. Missing or ambiguous FKs return an error.
+
+### Recursive tree construction
+
+Build nested JSON trees from self-referential tables. The `*` marker declares
+the fixed-point position — where children recurse with the same shape:
+
+```sql
+SELECT/1 {
+  id, name,
+  children: *
+} FROM categories
+  RECURSE ON (parent_id)
+  WHERE parent_id IS NULL
+```
+
+This produces a single nested JSON tree with all descendants. Use `SELECT`
+(without `/1`) for a forest (array of root trees). Specify an explicit PK
+with `RECURSE ON (parent_id = category_id)` when the PK isn't `id`.
+
+The output is generated entirely within SQL using a bracket-injection CTE
+strategy — no client-side assembly required.
 
 ### Comments and trailing commas
 

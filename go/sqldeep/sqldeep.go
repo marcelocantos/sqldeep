@@ -3,7 +3,7 @@
 
 package sqldeep
 
-//#include "sqldeep_c.h"
+//#include "sqldeep.h"
 //#include <stdlib.h>
 import "C"
 import "unsafe"

@@ -44,3 +44,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 - **Deferred**:
   - Bracket-quoted identifiers (`[column name]`) not supported — conflicts with array literal syntax. Documented as known limitation with double-quote workaround.
   - Operator table is a linear scan (info — carried from v0.1.0, still fine for current token set size)
+
+## 2026-03-15 — /release v0.8.0
+
+- **Commit**: (pending)
+- **Outcome**: Released v0.8.0. Added recursive tree construction (`RECURSE ON`) with bracket-injection CTE. Fixed Go bindings broken `#include`. Updated README with recursive select docs and comment syntax. All 325 assertions pass (47 test cases).
