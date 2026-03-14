@@ -39,7 +39,7 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-03-15 — /release v0.7.0
 
-- **Commit**: (pending)
+- **Commit**: `a57a7fd`
 - **Outcome**: Released v0.7.0. Replaced `//` comments with SQL-standard `--` line comments and `/* ... */` block comments (breaking change). Added `->` / `->>` JSON operator passthrough and FROM-context restriction for join arrows. Added per-feature stability levels (Stable/Experimental) to STABILITY.md. Added fixed-point comprehensions research paper. Added RecursiveSelect AST scaffolding. All 312 assertions pass (44 test cases).
 - **Deferred**:
   - Bracket-quoted identifiers (`[column name]`) not supported — conflicts with array literal syntax. Documented as known limitation with double-quote workaround.
