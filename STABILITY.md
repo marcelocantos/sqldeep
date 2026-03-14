@@ -2,30 +2,29 @@
 
 ## Stability commitment
 
-As of v1.0.0, the public API (`dist/sqldeep.h`), input syntax (the DSL), and
-output semantics are a backwards-compatibility contract. Breaking changes
-require a new major version.
+Once sqldeep reaches 1.0, its public API (`dist/sqldeep.h`), input syntax
+(the DSL), and output semantics become a backwards-compatibility contract.
+Breaking changes after 1.0 require a new major version. The pre-1.0 period
+exists to get the API and syntax right.
 
 ### Stability levels
 
-Each item in the catalogue below is marked with one of two levels:
+Each item in the catalogue below is marked with one of three levels:
 
-- **Stable** — covered by the backwards-compatibility contract. Will not change
-  in a backwards-incompatible way within the current major version. Removal or
-  breaking changes require a new major version.
-- **Experimental** — available for use but not yet part of the stability
-  contract. May change in syntax, semantics, or output form in any minor
-  release. Experimental items are promoted to Stable once the design is
-  confirmed through real-world usage. Promotion is a one-way door — once
-  Stable, an item cannot revert to Experimental.
+- **Stable** — design is settled and well-tested. Unlikely to change before
+  1.0, and will not change in a backwards-incompatible way after 1.0.
+- **Needs review** — functional but may benefit from refinement before locking
+  in. May change in any pre-1.0 release.
+- **Experimental** — new or recently changed. Needs real-world usage to confirm
+  the design. May change in any pre-1.0 release.
 
-New features land as Experimental. Existing Stable items are never affected by
-the addition of Experimental features — the contract is per-item, not
-per-release.
+Post-1.0, Stable items are covered by the backwards-compatibility contract.
+Experimental items may still change in minor releases. Promotion from
+Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v1.0.0.
+Snapshot as of v0.7.0 (unreleased).
 
 ### C API (`sqldeep.h`)
 
@@ -45,9 +44,9 @@ Snapshot as of v1.0.0.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"1.0.0"` | **Stable** |
-| `SQLDEEP_VERSION_MAJOR` | `1` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `0` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.7.0"` | **Stable** |
+| `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `7` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
@@ -78,10 +77,12 @@ Snapshot as of v1.0.0.
 | ON clause | `c->orders o ON id = cust_id` | **Stable** |
 | USING clause | `c->orders o USING (person_id)` | **Stable** |
 | JSON path extraction | `(expr).field[n]` | **Stable** |
-| Line comments | `// comment` | **Stable** |
+| Line comments | `-- comment` | **Experimental** |
+| Block comments | `/* comment */` | **Experimental** |
 | Trailing commas | `{ id, name, }` | **Stable** |
 | Plain FROM-first select | `FROM t SELECT id, name` | **Stable** |
 | SQL passthrough | `SELECT id FROM t` | **Stable** |
+| SQL `->` / `->>` passthrough | `data->>'name'` in non-FROM context | **Experimental** |
 
 ### Output semantics
 
@@ -106,13 +107,19 @@ Snapshot as of v1.0.0.
 | FK-guided join | Uses explicit FK metadata (no convention fallback) | **Stable** |
 | Multi-column FK | AND-joined conditions | **Stable** |
 
+### Parser behaviour
+
+| Behaviour | Description | Stability |
+|-----------|-------------|-----------|
+| `->` / `<-` FROM-only | Join arrows only recognised after FROM/JOIN | **Experimental** |
+
 ## Design decisions
 
 The following were evaluated during the pre-1.0 period and are now settled:
 
 - **Join path syntax** (`->`, `<-`): Tested through v0.2.0–v0.6.0 with chains,
   bridges, ON/USING overrides, and FK-guided mode. The syntax is compact and
-  unambiguous.
+  unambiguous within FROM context.
 - **Singular select** (`SELECT/1`): The `/1` suffix is unusual but compact,
   consistent with the DSL's style, and has no parsing ambiguity.
 - **JSON path extraction** (`(expr).path`): Parentheses disambiguate from
@@ -131,8 +138,39 @@ The following were evaluated during the pre-1.0 period and are now settled:
   header-only library convention and keeps integration simple.
 - **Error messages**: Error text is not part of the stability contract. Messages
   may be improved in minor releases.
+- **Comment syntax** (v0.7.0): Replaced `//` (JSON5-style) with SQL-standard
+  `--` line comments and `/* */` block comments. The `//` style served no
+  purpose in a language that already has standard comment syntax via its SQL
+  host. Block comments are flat (non-nested), matching SQLite semantics.
+- **`->` FROM-context restriction** (v0.7.0): The `->` and `<-` join operators
+  are now only recognised after FROM/JOIN keywords, resolving a conflict with
+  SQLite's `->` and `->>` JSON extraction operators. Previously, `->` after
+  any identifier at paren depth 0 was treated as a join arrow, which prevented
+  use of SQL JSON operators in SELECT, WHERE, and other non-FROM contexts.
 
-## Out of scope
+## Gaps and prerequisites
+
+Before 1.0:
+
+- **Comment syntax settling**: `--` and `/* */` replaced `//` in v0.7.0.
+  This is a breaking change from v0.6.0. Needs real-world usage to confirm
+  the change was the right call and that no edge cases remain.
+- **`->` FROM-context restriction settling**: Changed parser behaviour in
+  v0.7.0. Needs usage to confirm no false negatives (legitimate join arrows
+  missed) or false positives (non-join `->` incorrectly consumed).
+- **`->>` passthrough settling**: New lexer behaviour in v0.7.0. The lexer
+  extends `->` to `->>` when the `>` is touching. Needs usage to confirm
+  this heuristic is robust.
+
+## Known limitations
+
+- **Bracket-quoted identifiers** (`[column name]`): Not supported. The `[`
+  character is used for array literals in sqldeep syntax and cannot be
+  disambiguated from bracket-quoted identifiers at the lexer level. Use
+  double-quoted identifiers (`"column name"`) instead — this is the SQL
+  standard and works in all supported backends.
+
+## Out of scope for 1.0
 
 - Schema-aware transpilation (accepting a database handle for automatic FK
   introspection — FK metadata can already be passed manually via

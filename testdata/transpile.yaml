@@ -79,14 +79,28 @@ convention:
   # Comments
   - name: line comment stripped
     input: |-
-      // comment
+      -- comment
       SELECT { id } FROM t
     expected: "SELECT json_object('id', id) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t"
 
   - name: inline comment stripped
     input: |-
-      SELECT { id, // field
+      SELECT { id, -- field
+      name } FROM t
+    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
+
+  - name: block comment stripped
+    input: "SELECT { id, /* comment */ name } FROM t"
+    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
+
+  - name: multi-line block comment stripped
+    input: |-
+      SELECT { id,
+      /* this is a
+         multi-line comment */
       name } FROM t
     expected: "SELECT json_object('id', id, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
@@ -96,6 +110,19 @@ convention:
     input: "SELECT id, name FROM t WHERE x > 0"
     expected: "SELECT id, name FROM t WHERE x > 0"
 
+  - name: json arrow ->> passthrough
+    input: "SELECT data->>'name' FROM t"
+    expected: "SELECT data->>'name' FROM t"
+
+  - name: json arrow -> passthrough in SELECT
+    input: "SELECT data->'name' FROM t"
+    expected: "SELECT data->'name' FROM t"
+
+  - name: json arrow ->> in WHERE
+    input: "SELECT { id } FROM t WHERE data->>'type' = 'x'"
+    expected: "SELECT json_object('id', id) FROM t WHERE data->>'type' = 'x'"
+    expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE data->>'type' = 'x'"
+
   - name: number with trailing dot not absorbed
     input: "SELECT 1.0 + 2 FROM t"
     expected: "SELECT 1.0 + 2 FROM t"
@@ -104,8 +131,12 @@ convention:
     input: ""
     expected: ""
 
-  - name: only comments
-    input: "// just a comment"
+  - name: only line comment
+    input: "-- just a comment"
+    expected: ""
+
+  - name: only block comment
+    input: "/* just a comment */"
     expected: ""
 
   # Two-level nesting
@@ -244,7 +275,7 @@ convention:
 
   - name: from-first with comment
     input: |-
-      // query
+      -- query
       FROM t SELECT { id }
     expected: "SELECT json_object('id', id) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t"
@@ -675,6 +706,9 @@ errors:
 
   - name: json path expected closing bracket
     input: "SELECT (data)[0 FROM t"
+
+  - name: unterminated block comment
+    input: "SELECT /* unclosed comment { id } FROM t"
 
 # ── FK-guided error cases ────────────────────────────────────────────
 

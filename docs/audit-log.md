@@ -36,3 +36,11 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `b84c667`
 - **Outcome**: Released v0.6.0. Added aggregate field syntax (`field: SELECT expr` / `SELECT/1 expr` inside object literals for GROUP BY projections), computed keys (`(expr): value` for dynamic JSON key names). Fixed partial float lexing and replaced `assert()` with proper error reporting. All 298 assertions pass (42 test cases).
+
+## 2026-03-15 — /release v0.7.0
+
+- **Commit**: (pending)
+- **Outcome**: Released v0.7.0. Replaced `//` comments with SQL-standard `--` line comments and `/* ... */` block comments (breaking change). Added `->` / `->>` JSON operator passthrough and FROM-context restriction for join arrows. Added per-feature stability levels (Stable/Experimental) to STABILITY.md. Added fixed-point comprehensions research paper. Added RecursiveSelect AST scaffolding. All 312 assertions pass (44 test cases).
+- **Deferred**:
+  - Bracket-quoted identifiers (`[column name]`) not supported — conflicts with array literal syntax. Documented as known limitation with double-quote workaround.
+  - Operator table is a linear scan (info — carried from v0.1.0, still fine for current token set size)

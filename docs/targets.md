@@ -1,6 +1,6 @@
 # Targets
 
-<!-- last-evaluated: c1e87d9 -->
+<!-- last-evaluated: d4b1665 -->
 
 ## Active
 
@@ -8,14 +8,15 @@
 - **Weight**: 4 (value 13 / cost 3)
 - **Estimated-cost**: 3
 - **Acceptance**:
-  - All items in STABILITY.md are marked **Stable** (no "Needs review" remaining)
+  - All items in STABILITY.md are marked **Stable** (no Experimental or Needs review remaining)
+  - STABILITY.md "Gaps and prerequisites" section is resolved or moved to "Out of scope"
+  - Settling threshold met (N consecutive minor releases with zero breaking changes)
   - Version macros in `sqldeep.h` read `1.0.0`
   - `sqldeep_version()` returns `"1.0.0"`
-  - STABILITY.md "Gaps and prerequisites" section is resolved or moved to "Out of scope"
   - GitHub issue #10 is closed (resolved by computed key syntax)
   - Tagged release `v1.0.0` exists on GitHub
-- **Context**: All major features (join paths, singular selects, JSON paths, PostgreSQL, FK-guided joins, aggregates, computed keys) have been implemented and tested through v0.6.0 (298 assertions). The remaining work is stabilisation housekeeping, not feature development.
-- **Status**: converging
+- **Context**: v0.7.0 introduced three Experimental items (SQL comments, `->` FROM-context restriction, `->>` passthrough) and a breaking change (removed `//` comments). The settling clock has reset. 1.0 requires these to stabilise through real-world usage before promotion. The C API and all pre-v0.7.0 syntax items are Stable.
+- **Status**: blocked (settling period — need Experimental items to prove out)
 - **Discovered**: 2026-03-12
 
 ### 🎯T2 Recursive tree construction from self-referential tables

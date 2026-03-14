@@ -55,9 +55,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "1.0.0"
-SQLDEEP_VERSION_MAJOR // 1
-SQLDEEP_VERSION_MINOR // 0
+SQLDEEP_VERSION       // "0.7.0"
+SQLDEEP_VERSION_MAJOR // 0
+SQLDEEP_VERSION_MINOR // 7
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```
@@ -104,7 +104,7 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - JSON path extraction: `(expr).field.sub[n]` → `json_extract(expr, '$.field.sub[n]')` (SQLite)
   / `jsonb_extract_path(expr, 'field', 'sub', 'n')` (PostgreSQL).
   Parentheses around the base expression disambiguate from `table.column`.
-- `//` line comments are stripped.
+- `--` line comments and `/* ... */` block comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }` or `[ ]` passes through unchanged.
 

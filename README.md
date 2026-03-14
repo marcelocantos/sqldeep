@@ -165,7 +165,7 @@ no fallback to the naming convention. Missing or ambiguous FKs return an error.
 
 ### Comments and trailing commas
 
-- `//` line comments are stripped
+- `--` line comments and `/* ... */` block comments are stripped
 - Trailing commas are allowed in objects and arrays
 
 ### SQL passthrough

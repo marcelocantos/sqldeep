@@ -116,7 +116,8 @@ is standard and works unchanged across backends.
 - FK-guided mode: `transpile(input, foreign_keys)` uses explicit FK metadata
   instead of the naming convention. Supports multi-column FKs. Errors on
   missing or ambiguous FK matches (no convention fallback).
-- `//` line comments stripped
+- `--` line comments stripped
+- `/* ... */` block comments stripped (flat, not nested)
 - Trailing commas allowed
 
 ## File layout

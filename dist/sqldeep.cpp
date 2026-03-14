@@ -126,6 +126,11 @@ public:
                 (c == '-' && n == '>')) {
                 s += n;
                 advance();
+                // Extend -> to ->> when the > is touching (SQL JSON operator)
+                if (s == "->" && pos_ < src_.size() && src_[pos_] == '>') {
+                    s += '>';
+                    advance();
+                }
             }
         }
         return {TokenType::Other, s, tline, tcol, begin, pos_};
@@ -167,9 +172,23 @@ private:
         while (pos_ < src_.size()) {
             if (std::isspace(static_cast<unsigned char>(src_[pos_]))) {
                 advance();
-            } else if (pos_ + 1 < src_.size() && src_[pos_] == '/' && src_[pos_ + 1] == '/') {
+            } else if (pos_ + 1 < src_.size() && src_[pos_] == '-' && src_[pos_ + 1] == '-') {
+                // SQL line comment: -- to end of line
                 advance(); advance();
                 while (pos_ < src_.size() && src_[pos_] != '\n') advance();
+            } else if (pos_ + 1 < src_.size() && src_[pos_] == '/' && src_[pos_ + 1] == '*') {
+                // SQL block comment: /* ... */ (flat, not nested)
+                int cline = line_, ccol = col_;
+                advance(); advance();
+                while (pos_ < src_.size()) {
+                    if (src_[pos_] == '*' && pos_ + 1 < src_.size() && src_[pos_ + 1] == '/') {
+                        advance(); advance();
+                        break;
+                    }
+                    advance();
+                }
+                if (pos_ >= src_.size() && (pos_ < 2 || src_[pos_ - 2] != '*' || src_[pos_ - 1] != '/'))
+                    error("unterminated block comment", cline, ccol);
             } else {
                 break;
             }
@@ -666,6 +685,7 @@ private:
         };
 
         bool need_space = false; // space needed after a non-string AST part
+        bool in_from_context = false; // true after FROM/JOIN at depth 0
 
         auto accum_token = [&](const Token& tok) {
             if (has_raw) {
@@ -844,8 +864,23 @@ private:
                 --paren_depth;
             }
 
-            // Check for ident (-> | <-) ... (join path)
-            if (t.type == TokenType::Ident && paren_depth == 0) {
+            // Track FROM context for join path detection.
+            // -> and <- are only join operators after FROM/JOIN.
+            if (paren_depth == 0 && t.type == TokenType::Ident) {
+                if (is_from_or_join(t)) {
+                    in_from_context = true;
+                } else if (is_keyword(t, "SELECT") || is_keyword(t, "WHERE") ||
+                           is_keyword(t, "GROUP") || is_keyword(t, "ORDER") ||
+                           is_keyword(t, "HAVING") || is_keyword(t, "LIMIT") ||
+                           is_keyword(t, "UNION") || is_keyword(t, "INTERSECT") ||
+                           is_keyword(t, "EXCEPT") || is_keyword(t, "SET")) {
+                    in_from_context = false;
+                }
+            }
+
+            // Check for ident (-> | <-) ... (join path) — only in FROM context
+            if (t.type == TokenType::Ident && paren_depth == 0 &&
+                in_from_context) {
                 auto st = lex_.save();
                 Token alias_tok = lex_.next(); // consume ident
                 Token arrow = lex_.peek();

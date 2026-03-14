@@ -809,6 +809,31 @@ TEST_CASE("sqlite: plain SQL passthrough") {
     CHECK(rows[0] == "1");
 }
 
+// ── JSON arrow operators ────────────────────────────────────────────
+
+TEST_CASE("sqlite: json ->> operator passthrough") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, data TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, '{\"name\":\"alice\"}')");
+
+    auto rows = transpile_and_query(g.db,
+        "SELECT { id, name: data->>'name' } FROM t");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"id":1,"name":"alice"})");
+}
+
+TEST_CASE("sqlite: json -> operator in WHERE") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, data TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, '{\"type\":\"a\"}')");
+    exec(g.db, "INSERT INTO t VALUES(2, '{\"type\":\"b\"}')");
+
+    auto rows = transpile_and_query(g.db,
+        "SELECT { id } FROM t WHERE data->>'type' = 'a'");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"id":1})");
+}
+
 // ── FK-guided joins ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: fk-guided join") {
