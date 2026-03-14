@@ -356,6 +356,7 @@ static bool is_sql_keyword(const std::string& s) {
         "CASE", "WHEN", "THEN", "ELSE", "END", "SET", "INTO",
         "VALUES", "INSERT", "UPDATE", "DELETE", "DISTINCT", "ALL",
         "ASC", "DESC", "BY", "OFFSET", "FETCH", "FOR", "WITH", "USING",
+        "RECURSE",
     };
     for (const char* kw : keywords) {
         if (is_keyword({TokenType::Ident, s, 0, 0, 0, 0}, kw))
@@ -737,14 +738,15 @@ private:
                     if (t3.type == TokenType::LBrace || t3.type == TokenType::LBracket) {
                         // Found (SELECT[/1] {/[)
                         flush_before(t);
-                        auto ds = parse_deep_select(t2, singular,
+                        auto part = parse_deep_or_recursive_select(
+                            t2, singular,
                             /*stop_comma=*/false, /*stop_rbrace=*/false,
                             /*stop_rbracket=*/false, /*stop_rparen=*/true,
                             depth + 1);
                         Token rp = lex_.next(); // consume )
                         if (rp.type != TokenType::RParen)
                             lex_.error("expected ')' after subquery", rp.line, rp.col);
-                        parts.push_back(std::move(ds));
+                        parts.push_back(std::move(part));
                         last_end = rp.src_end;
                         need_space = true;
                         continue;
@@ -801,11 +803,12 @@ private:
                     flush_before(t);
                     Token sel = {TokenType::Ident, "SELECT", t.line, t.col,
                                  t.src_begin, t.src_end};
-                    auto ds = parse_deep_select(sel, singular,
+                    auto part = parse_deep_or_recursive_select(
+                                                sel, singular,
                                                 stop_comma, stop_rbrace,
                                                 stop_rbracket, stop_rparen,
                                                 depth + 1);
-                    parts.push_back(std::move(ds));
+                    parts.push_back(std::move(part));
                     last_end = lex_.offset();
                     need_space = true;
                     continue;
@@ -956,31 +959,133 @@ private:
         return parts;
     }
 
+    // Parse RECURSE ON (fk [= pk]) [WHERE ...]
+    // Called after parsing object literal with a recursive field.
+    std::unique_ptr<RecursiveSelect> parse_recursive_select(
+            ObjectLiteral obj, bool singular,
+            bool stop_comma, bool stop_rbrace,
+            bool stop_rbracket, bool stop_rparen,
+            int depth) {
+        auto rs = std::make_unique<RecursiveSelect>();
+        rs->singular = singular;
+
+        // Separate recursive field from non-recursive fields
+        for (auto& f : obj.fields) {
+            if (f.recursive) {
+                rs->children_field = f.key;
+            } else {
+                rs->fields.push_back(std::move(f));
+            }
+        }
+
+        // Expect FROM table
+        Token from_tok = lex_.peek();
+        if (!is_keyword(from_tok, "FROM"))
+            lex_.error("expected FROM after recursive object literal",
+                       from_tok.line, from_tok.col);
+        lex_.next(); // consume FROM
+        Token table_tok = lex_.peek();
+        if (table_tok.type != TokenType::Ident)
+            lex_.error("expected table name after FROM",
+                       table_tok.line, table_tok.col);
+        lex_.next();
+        rs->table = table_tok.text;
+
+        // Expect RECURSE ON (fk [= pk])
+        Token recurse_tok = lex_.peek();
+        if (!is_keyword(recurse_tok, "RECURSE"))
+            lex_.error("expected RECURSE after table name",
+                       recurse_tok.line, recurse_tok.col);
+        lex_.next();
+        Token on_tok = lex_.peek();
+        if (!is_keyword(on_tok, "ON"))
+            lex_.error("expected ON after RECURSE",
+                       on_tok.line, on_tok.col);
+        lex_.next();
+        Token lparen = lex_.peek();
+        if (lparen.type != TokenType::LParen)
+            lex_.error("expected '(' after RECURSE ON",
+                       lparen.line, lparen.col);
+        lex_.next();
+        Token fk_tok = lex_.peek();
+        if (fk_tok.type != TokenType::Ident)
+            lex_.error("expected FK column name",
+                       fk_tok.line, fk_tok.col);
+        lex_.next();
+        rs->fk_column = fk_tok.text;
+        rs->pk_column = "id"; // default
+
+        Token eq_or_rp = lex_.peek();
+        if (eq_or_rp.type == TokenType::Other && eq_or_rp.text == "=") {
+            lex_.next(); // consume =
+            Token pk_tok = lex_.peek();
+            if (pk_tok.type != TokenType::Ident)
+                lex_.error("expected PK column name after '='",
+                           pk_tok.line, pk_tok.col);
+            lex_.next();
+            rs->pk_column = pk_tok.text;
+            eq_or_rp = lex_.peek();
+        }
+        if (eq_or_rp.type != TokenType::RParen)
+            lex_.error("expected ')' after RECURSE ON clause",
+                       eq_or_rp.line, eq_or_rp.col);
+        lex_.next(); // consume )
+
+        // Optional WHERE condition
+        Token where_tok = lex_.peek();
+        if (is_keyword(where_tok, "WHERE")) {
+            lex_.next(); // consume WHERE
+            rs->root_condition = parse_sql_parts(stop_comma, stop_rbrace,
+                                                  stop_rbracket, stop_rparen,
+                                                  depth);
+        }
+
+        return rs;
+    }
+
     // Parse deep select — SELECT keyword has already been consumed.
     // singular: true if /1 was already consumed after SELECT.
-    std::unique_ptr<DeepSelect> parse_deep_select(
+    // Returns either a DeepSelect or a RecursiveSelect (via SqlPart).
+    SqlPart parse_deep_or_recursive_select(
             const Token& select_tok,
             bool singular,
             bool stop_comma, bool stop_rbrace,
             bool stop_rbracket, bool stop_rparen,
             int depth) {
         check_depth(depth, select_tok.line, select_tok.col);
-        auto ds = std::make_unique<DeepSelect>();
-        ds->singular = singular;
 
         Token t = lex_.peek();
         if (t.type == TokenType::LBrace) {
-            ds->projection = std::move(*parse_object_literal(depth));
+            auto obj = parse_object_literal(depth);
+
+            // Check if any field is recursive
+            for (const auto& f : obj->fields) {
+                if (f.recursive) {
+                    return parse_recursive_select(
+                        std::move(*obj), singular,
+                        stop_comma, stop_rbrace,
+                        stop_rbracket, stop_rparen, depth);
+                }
+            }
+
+            // Normal deep select
+            auto ds = std::make_unique<DeepSelect>();
+            ds->singular = singular;
+            ds->projection = std::move(*obj);
+            ds->tail = parse_sql_parts(stop_comma, stop_rbrace,
+                                       stop_rbracket, stop_rparen, depth);
+            return ds;
         } else if (t.type == TokenType::LBracket) {
+            auto ds = std::make_unique<DeepSelect>();
+            ds->singular = singular;
             ds->projection = std::move(*parse_array_literal(depth));
+            ds->tail = parse_sql_parts(stop_comma, stop_rbrace,
+                                       stop_rbracket, stop_rparen, depth);
+            return ds;
         } else {
             lex_.error("expected '{' or '[' after SELECT",
                        select_tok.line, select_tok.col);
         }
-
-        ds->tail = parse_sql_parts(stop_comma, stop_rbrace,
-                                   stop_rbracket, stop_rparen, depth);
-        return ds;
     }
 
     std::unique_ptr<ObjectLiteral> parse_object_literal(int depth) {
@@ -1059,8 +1164,16 @@ private:
         if (t.type == TokenType::Colon) {
             lex_.next();
 
-            // Check for SELECT expr (no FROM) → aggregate field
+            // Check for * → recursive field
             Token t2 = lex_.peek();
+            if (t2.type == TokenType::Other && t2.text == "*") {
+                lex_.next(); // consume *
+                field.recursive = true;
+                return field;
+            }
+
+            // Check for SELECT expr (no FROM) → aggregate field
+            t2 = lex_.peek();
             if (is_keyword(t2, "SELECT")) {
                 auto st = lex_.save();
                 lex_.next(); // consume SELECT
@@ -1316,7 +1429,7 @@ class Renderer {
 public:
     explicit Renderer(const FkIndex* fk_index = nullptr,
                       Backend backend = Backend::sqlite)
-        : fk_index_(fk_index) {
+        : fk_index_(fk_index), backend_(backend) {
         switch (backend) {
         case Backend::postgres:
             fn_object_      = "jsonb_build_object";
@@ -1352,6 +1465,8 @@ private:
                     render_array(*v, out);
                 } else if constexpr (std::is_same_v<T, std::unique_ptr<JoinPath>>) {
                     render_join_path(*v, out);
+                } else if constexpr (std::is_same_v<T, std::unique_ptr<RecursiveSelect>>) {
+                    render_recursive_select(*v, out);
                 }
             }, part);
         }
@@ -1512,7 +1627,122 @@ private:
         }
     }
 
+    void render_recursive_select(const RecursiveSelect& rs, std::string& out) {
+        bool is_pg = (backend_ == Backend::postgres);
+
+        // Build json_object(...) argument list for non-recursive fields
+        std::string obj_args;
+        std::string col_list;    // column names for CTE
+        std::string col_select;  // column references with c. prefix for recursive step
+        for (size_t i = 0; i < rs.fields.size(); ++i) {
+            const auto& f = rs.fields[i];
+            std::string col = f.value.empty() ? f.key : f.key; // column name
+            std::string expr;
+            if (f.value.empty()) {
+                expr = f.key; // bare field
+            } else {
+                // For renamed fields, the value is the SQL expression
+                std::string val_str;
+                // Render the value parts to a string
+                Renderer tmp(fk_index_, backend_);
+                val_str = tmp.render_document(f.value);
+                expr = val_str;
+                col = val_str; // use the expression as the column name
+            }
+            if (i > 0) { col_list += ", "; col_select += ", "; }
+            col_list += col;
+            col_select += "c." + col;
+
+            if (i > 0) obj_args += ", ";
+            obj_args += "'";
+            obj_args += sql_escape_key(f.key);
+            obj_args += "', ";
+            obj_args += col;
+        }
+
+        // Add FK and PK columns to CTE column list
+        col_list += ", " + rs.fk_column;
+        col_select += ", c." + rs.fk_column;
+        if (rs.pk_column != rs.fk_column) {
+            // PK might already be in the field list
+            bool pk_in_fields = false;
+            for (const auto& f : rs.fields) {
+                std::string col = f.value.empty() ? f.key : f.key;
+                if (f.value.empty() && f.key == rs.pk_column) { pk_in_fields = true; break; }
+            }
+            if (!pk_in_fields) {
+                col_list += ", " + rs.pk_column;
+                col_select += ", c." + rs.pk_column;
+            }
+        }
+
+        std::string pad_fn = is_pg
+            ? "lpad(CAST(" + rs.pk_column + " AS text), 10, '0')"
+            : "printf('%010d', " + rs.pk_column + ")";
+        std::string c_pad_fn = is_pg
+            ? "lpad(CAST(c." + rs.pk_column + " AS text), 10, '0')"
+            : "printf('%010d', c." + rs.pk_column + ")";
+        std::string high_char = is_pg ? "chr(127)" : "char(127)";
+        std::string concat_fn_open = is_pg
+            ? "string_agg(_fragment, '' ORDER BY _sort_key)"
+            : "group_concat(_fragment, '')";
+
+        // Emit the 3-CTE bracket-injection template
+        out += "WITH RECURSIVE _sdq_dfs(";
+        out += col_list;
+        out += ", _depth, _path) AS (SELECT ";
+        out += col_list;
+        out += ", 0, ";
+        out += pad_fn;
+        out += " FROM ";
+        out += rs.table;
+        if (!rs.root_condition.empty()) {
+            out += " WHERE ";
+            render_parts(rs.root_condition, out, /*nested=*/false);
+        }
+        out += " UNION ALL SELECT ";
+        out += col_select;
+        out += ", d._depth + 1, d._path || '/' || ";
+        out += c_pad_fn;
+        out += " FROM ";
+        out += rs.table;
+        out += " c JOIN _sdq_dfs d ON c.";
+        out += rs.fk_column;
+        out += " = d.";
+        out += rs.pk_column;
+        out += "), _sdq_ranked AS (SELECT *, ";
+        out += fn_object_;
+        out += "(";
+        out += obj_args;
+        out += ") AS _obj, ROW_NUMBER() OVER (PARTITION BY ";
+        out += rs.fk_column;
+        out += " ORDER BY ";
+        out += rs.pk_column;
+        out += ") AS _child_rank FROM _sdq_dfs), ";
+        out += "_sdq_events(_sort_key, _fragment) AS (SELECT _path, ";
+        out += "CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || ";
+        out += "substr(_obj, 1, length(_obj) - 1) || ',\"";
+        out += sql_escape_key(rs.children_field);
+        out += "\":[' FROM _sdq_ranked UNION ALL SELECT _path || ";
+        out += high_char;
+        out += ", ']}' FROM _sdq_ranked) SELECT ";
+
+        if (!rs.singular) {
+            out += "'[' || ";
+        }
+        if (is_pg) {
+            out += concat_fn_open;
+        } else {
+            out += "group_concat(_fragment, '')";
+        }
+        if (!rs.singular) {
+            out += " || ']'";
+        }
+        out += " FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)";
+    }
+
     const FkIndex* fk_index_;
+    Backend backend_;
     const char* fn_object_;
     const char* fn_array_;
     const char* fn_group_array_;

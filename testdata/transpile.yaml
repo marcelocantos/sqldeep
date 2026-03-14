@@ -599,6 +599,49 @@ convention:
     input: "SELECT (x + 1) FROM t"
     expected: "SELECT (x + 1) FROM t"
 
+# ── Recursive select ─────────────────────────────────────────────────
+
+  - name: basic recursive tree
+    input: |-
+      SELECT/1 {
+        id, name,
+        children: *
+      } FROM categories
+        RECURSE ON (parent_id)
+        WHERE parent_id IS NULL
+    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+
+  - name: recursive forest (non-singular)
+    input: |-
+      SELECT {
+        id, name,
+        children: *
+      } FROM categories
+        RECURSE ON (parent_id)
+        WHERE parent_id IS NULL
+    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT '[' || group_concat(_fragment, '') || ']' FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+
+  - name: recursive with explicit PK
+    input: |-
+      SELECT/1 {
+        id, name,
+        subs: *
+      } FROM nodes
+        RECURSE ON (parent_nid = nid)
+        WHERE parent_nid IS NULL
+    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_nid, nid, _depth, _path) AS (SELECT id, name, parent_nid, nid, 0, printf('%010d', nid) FROM nodes WHERE parent_nid IS NULL UNION ALL SELECT c.id, c.name, c.parent_nid, c.nid, d._depth + 1, d._path || '/' || printf('%010d', c.nid) FROM nodes c JOIN _sdq_dfs d ON c.parent_nid = d.nid), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_nid ORDER BY nid) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"subs\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+
+  - name: recursive postgres
+    input: |-
+      SELECT/1 {
+        id, name,
+        children: *
+      } FROM categories
+        RECURSE ON (parent_id)
+        WHERE parent_id IS NULL
+    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected_postgres: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, lpad(CAST(id AS text), 10, '0') FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || lpad(CAST(c.id AS text), 10, '0') FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, jsonb_build_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || chr(127), ']}' FROM _sdq_ranked) SELECT string_agg(_fragment, '' ORDER BY _sort_key) FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+
 # ── FK-guided join resolution ────────────────────────────────────────
 
 fk:
@@ -709,6 +752,12 @@ errors:
 
   - name: unterminated block comment
     input: "SELECT /* unclosed comment { id } FROM t"
+
+  - name: recursive missing FROM
+    input: "SELECT { id, children: * } RECURSE ON (parent_id)"
+
+  - name: recursive missing RECURSE
+    input: "SELECT { id, children: * } FROM t WHERE parent_id IS NULL"
 
 # ── FK-guided error cases ────────────────────────────────────────────
 

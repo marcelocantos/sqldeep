@@ -834,6 +834,64 @@ TEST_CASE("sqlite: json -> operator in WHERE") {
     CHECK(rows[0] == R"({"id":1})");
 }
 
+// ── Recursive select ────────────────────────────────────────────────
+
+TEST_CASE("sqlite: recursive tree") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER);
+        INSERT INTO categories VALUES(1, 'Root', NULL);
+        INSERT INTO categories VALUES(2, 'A', 1);
+        INSERT INTO categories VALUES(3, 'B', 1);
+        INSERT INTO categories VALUES(4, 'A1', 2);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT/1 { id, name, children: * }
+        FROM categories
+        RECURSE ON (parent_id)
+        WHERE parent_id IS NULL
+    )");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"id":1,"name":"Root","children":[{"id":2,"name":"A","children":[{"id":4,"name":"A1","children":[]}]},{"id":3,"name":"B","children":[]}]})");
+}
+
+TEST_CASE("sqlite: recursive forest") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER);
+        INSERT INTO categories VALUES(1, 'Root1', NULL);
+        INSERT INTO categories VALUES(2, 'Root2', NULL);
+        INSERT INTO categories VALUES(3, 'Child1', 1);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT { id, name, children: * }
+        FROM categories
+        RECURSE ON (parent_id)
+        WHERE parent_id IS NULL
+    )");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"([{"id":1,"name":"Root1","children":[{"id":3,"name":"Child1","children":[]}]},{"id":2,"name":"Root2","children":[]}])");
+}
+
+TEST_CASE("sqlite: recursive empty tree") {
+    DbGuard g;
+    exec(g.db, R"(
+        CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER);
+    )");
+
+    auto rows = transpile_and_query(g.db, R"(
+        SELECT/1 { id, name, children: * }
+        FROM categories
+        RECURSE ON (parent_id)
+        WHERE parent_id IS NULL
+    )");
+    REQUIRE(rows.size() == 1);
+    // group_concat on zero rows returns NULL
+    CHECK(rows[0] == "NULL");
+}
+
 // ── FK-guided joins ─────────────────────────────────────────────────
 
 TEST_CASE("sqlite: fk-guided join") {
