@@ -256,13 +256,15 @@ struct DeepSelect;
 struct ObjectLiteral;
 struct ArrayLiteral;
 struct JoinPath;
+struct RecursiveSelect;
 
 using SqlPart = std::variant<
     std::string,
     std::unique_ptr<DeepSelect>,
     std::unique_ptr<ObjectLiteral>,
     std::unique_ptr<ArrayLiteral>,
-    std::unique_ptr<JoinPath>
+    std::unique_ptr<JoinPath>,
+    std::unique_ptr<RecursiveSelect>
 >;
 using SqlParts = std::vector<SqlPart>;
 
@@ -272,6 +274,7 @@ struct ObjectLiteral {
         SqlParts computed_key; // non-empty = (expr) computed key
         SqlParts value; // empty = bare field
         bool aggregate = false; // SELECT expr (no FROM) → json_group_array(expr)
+        bool recursive = false; // * = recurse with same shape
     };
     std::vector<Field> fields;
 };
@@ -298,6 +301,16 @@ struct DeepSelect {
     std::variant<ObjectLiteral, ArrayLiteral, SqlParts> projection;
     SqlParts tail;
     bool singular = false; // SELECT/1: no json_group_array, add LIMIT 1
+};
+
+struct RecursiveSelect {
+    std::vector<ObjectLiteral::Field> fields; // non-recursive fields
+    std::string children_field;               // name of recursive field
+    std::string table;                        // table to recurse on
+    std::string fk_column;                    // self-referential FK column
+    std::string pk_column;                    // PK column (default: "id")
+    SqlParts root_condition;                  // WHERE condition (without WHERE keyword)
+    bool singular = false;                    // SELECT/1: single root
 };
 
 // ── Parser ──────────────────────────────────────────────────────────

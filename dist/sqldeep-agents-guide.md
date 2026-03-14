@@ -55,9 +55,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "0.6.0"
-SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 6
+SQLDEEP_VERSION       // "1.0.0"
+SQLDEEP_VERSION_MAJOR // 1
+SQLDEEP_VERSION_MINOR // 0
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```
