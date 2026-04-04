@@ -86,6 +86,15 @@ Snapshot as of v0.8.0.
 | Recursive select | `SELECT { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
 | Recursive explicit PK | `RECURSE ON (fk = pk)` | **Experimental** |
 | Recursive singular | `SELECT/1 { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
+| XML element | `<div class="x">{expr}</div>` | **Experimental** |
+| XML self-closing | `<br/>`, `<img src={url}/>` | **Experimental** |
+| XML interpolation | `{expr}` inside XML content/attributes | **Experimental** |
+| XML subquery | `{SELECT <li>{name}</li> FROM t}` inside XML | **Experimental** |
+| XML namespaced tag | `<ui:Table.Cell>{v}</ui:Table.Cell>` | **Experimental** |
+| XML boolean attribute | `<input disabled/>` | **Experimental** |
+| XML inside JSON | `{ card: <div>{name}</div> }` | **Experimental** |
+| JSON object inside XML | `<td>{{name, qty}}</td>` | **Experimental** |
+| Literal brace in XML | `{'{'}` | **Experimental** |
 
 ### Output semantics
 
@@ -110,6 +119,8 @@ Snapshot as of v0.8.0.
 | FK-guided join | Uses explicit FK metadata (no convention fallback) | **Stable** |
 | Multi-column FK | AND-joined conditions | **Stable** |
 | Recursive select | `WITH RECURSIVE` 3-CTE bracket-injection template | **Experimental** |
+| XML element | `xml_element('tag', xml_attrs(...), ...)` | **Experimental** |
+| XML subquery aggregation | `xml_agg(xml_element(...))` | **Experimental** |
 
 ### Parser behaviour
 
@@ -169,6 +180,11 @@ Before 1.0:
   field marker, and bracket-injection CTE output all need real-world usage.
   Current limitations: top-level only (not nested), integer PKs only,
   no FROM-first variant, no renamed/computed fields within the recursive shape.
+- **XML literals settling**: New in v0.9.0. `<tag>` syntax, `{expr}`
+  interpolation, `{SELECT ...}` subqueries with `xml_agg`, namespaced tags,
+  boolean attributes. The runtime functions (`xml_element`, `xml_attrs`,
+  `xml_agg`) are not part of sqldeep — sqldeep only emits calls to them.
+  Whitespace handling in XML body text is literal (not stripped like JSX).
 
 ## Known limitations
 
