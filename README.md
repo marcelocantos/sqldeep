@@ -184,6 +184,43 @@ with `RECURSE ON (parent_id = category_id)` when the PK isn't `id`.
 The output is generated entirely within SQL using a bracket-injection CTE
 strategy — no client-side assembly required.
 
+### XML/HTML literals
+
+Produce well-formed markup directly from SQL queries. Designed for reactive UI
+with [sqlpipe](https://github.com/marcelocantos/sqlpipe) — a single expression
+both queries data and produces the HTML to render.
+
+```sql
+SELECT <table class="products">
+  <tr><th>Item</th><th>Price</th></tr>
+  {SELECT <tr>
+    <td>{name}</td>
+    <td>{'$' || price}</td>
+  </tr> FROM items ORDER BY name}
+</table>
+-- → SELECT xml_element('table', xml_attrs('class', 'products'),
+--     xml_element('tr', xml_element('th', 'Item'), xml_element('th', 'Price')),
+--     (SELECT xml_agg(xml_element('tr',
+--       xml_element('td', name), xml_element('td', '$' || price)))
+--      FROM items ORDER BY name))
+```
+
+- `<tag attr="static" dynamic={expr}>...</tag>` → `xml_element('tag', xml_attrs(...), ...)`
+- `{expr}` interpolation in content and attributes
+- `{SELECT ...}` subqueries aggregate with `xml_agg()` instead of `json_group_array()`
+- `{SELECT/1 ...}` singular subquery (no aggregation, adds `LIMIT 1`)
+- Self-closing: `<br/>`, `<img src={url}/>`
+- Boolean attributes: `<input disabled/>` → `disabled="disabled"`
+- Namespaced tags: `<ui:Table.Cell>` for component frameworks
+- XML inside JSON: `{ name, card: <div>{name}</div> }` — XML expression as field value
+- JSON inside XML: `<td>{{name, qty}}</td>` — double braces for JSON object interpolation
+- JSON path in XML: `<td>{(data).field}</td>` — existing path syntax works inside interpolation
+- Literal braces: `{'{'}` for a literal `{`
+
+The XML functions (`xml_element`, `xml_attrs`, `xml_agg`) are runtime concerns —
+sqldeep only emits calls to them. The `sqldeep` CLI includes reference
+implementations for interactive use.
+
 ### Comments and trailing commas
 
 - `--` line comments and `/* ... */` block comments are stripped
@@ -236,6 +273,18 @@ mk example  # run the demo
 ```
 
 Requires C++20 and [mk](https://github.com/marcelocantos/mk).
+
+### Interactive CLI
+
+```sh
+mk shell                       # build the CLI
+cp build/sqldeep ~/.local/bin/  # install
+sqldeep mydb.db                 # interactive session
+```
+
+The `sqldeep` binary is a full SQLite shell (readline, dot-commands, all flags)
+with sqldeep transpilation and XML functions (`xml_element`, `xml_attrs`,
+`xml_agg`) built in.
 
 ## Integration
 
