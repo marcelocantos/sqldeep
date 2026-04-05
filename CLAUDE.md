@@ -124,7 +124,10 @@ is standard and works unchanged across backends.
 - `RECURSE ON (fk = pk)` for explicit PK column (default: `id`)
 - `SELECT { ..., children: * } FROM t RECURSE ON (fk)` → forest output wrapped in `[]`
 - XML element: `<div class="card">{name}</div>` → `xml_element('div', xml_attrs('class', 'card'), name)`
-- XML self-closing: `<br/>` → `xml_element('br')`
+- XML self-closing (void): `<br/>` → `xml_element('br/')` (trailing `/` signals void element → `<br/>`)
+- XML empty non-void: `<div></div>` → `xml_element('div')` (renders `<div></div>`, not `<div/>`)
+- XML multi-line dedent: common leading whitespace prefix is stripped across
+  lines so source indentation produces relative indentation in output
 - XML interpolation: `{expr}` inside XML content or attributes
 - XML subquery: `{SELECT <li>{name}</li> FROM t}` inside XML
   → `(SELECT xml_agg(xml_element('li', name)) FROM t)`
@@ -170,7 +173,8 @@ mkfile                      Build system (mk)
   FK-guided joins (forward, reverse, chain, bridge, multi-column, error cases),
   recursive select (`RECURSE ON`) variants (basic tree, forest, explicit PK,
   PostgreSQL backend), XML literals (static elements, attributes, interpolation,
-  nested elements, subqueries, namespaced tags, self-closing, boolean attributes,
+  nested elements, subqueries, namespaced tags, self-closing void elements,
+  empty non-void elements, multi-line dedent, boolean attributes,
   XML inside JSON, JSON object inside XML, JSON path inside XML, literal braces,
   error cases)
 

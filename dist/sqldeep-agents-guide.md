@@ -68,9 +68,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "0.10.0"
+SQLDEEP_VERSION       // "0.13.0"
 SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 10
+SQLDEEP_VERSION_MINOR // 13
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```
@@ -122,7 +122,10 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
   `RECURSE ON (fk = pk)` for explicit PK (default: `id`). `SELECT` (no `/1`) produces a forest `[]`.
   Output is a bracket-injection CTE — no client-side assembly.
 - XML element: `<div class="card">{name}</div>` → `xml_element('div', xml_attrs('class', 'card'), name)`
-- XML self-closing: `<br/>` → `xml_element('br')`
+- XML self-closing: `<br/>` → `xml_element('br/')` (trailing `/` in tag name signals void element)
+- XML empty non-void: `<div></div>` → `xml_element('div')` (renders `<div></div>`, not `<div/>`)
+- XML multi-line dedent: common leading-space prefix across lines is stripped,
+  so source indentation produces relative indentation in output
 - XML interpolation: `{expr}` inside XML content or attributes
 - XML subquery: `{SELECT <li>{name}</li> FROM t}` → `(SELECT xml_agg(xml_element('li', name)) FROM t)`
 - XML singular subquery: `{SELECT/1 <span>{name}</span> FROM t}` → `(SELECT xml_element(...) FROM t LIMIT 1)`

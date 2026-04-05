@@ -209,13 +209,17 @@ SELECT <table class="products">
 - `{expr}` interpolation in content and attributes
 - `{SELECT ...}` subqueries aggregate with `xml_agg()` instead of `json_group_array()`
 - `{SELECT/1 ...}` singular subquery (no aggregation, adds `LIMIT 1`)
-- Self-closing: `<br/>`, `<img src={url}/>`
+- Self-closing void elements: `<br/>`, `<img src={url}/>` — rendered as `<br/>` (never `<br></br>`)
+- Non-void empty elements: `<div></div>` — rendered as `<div></div>` (never `<div/>`)
 - Boolean attributes: `<input disabled/>` → `disabled="disabled"`
 - Namespaced tags: `<ui:Table.Cell>` for component frameworks
+- Computed key: `{ (expr): val }` → `json_object(expr, val)` (runtime key)
 - XML inside JSON: `{ name, card: <div>{name}</div> }` — XML expression as field value
 - JSON inside XML: `<td>{{name, qty}}</td>` — double braces for JSON object interpolation
 - JSON path in XML: `<td>{(data).field}</td>` — existing path syntax works inside interpolation
 - Literal braces: `{'{'}` for a literal `{`
+- Multi-line dedent: common leading whitespace is stripped, so source indentation
+  produces relative indentation in output
 - JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` → `["div",{"class":"card"},"alice"]`
 
 #### JSONML output

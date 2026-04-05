@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.12.0.
+Snapshot as of v0.13.0.
 
 ### C API (`sqldeep.h`)
 
@@ -53,9 +53,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.12.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.13.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `12` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `13` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
@@ -96,7 +96,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | Recursive explicit PK | `RECURSE ON (fk = pk)` | **Experimental** |
 | Recursive singular | `SELECT/1 { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
 | XML element | `<div class="x">{expr}</div>` | **Experimental** |
-| XML self-closing | `<br/>`, `<img src={url}/>` | **Experimental** |
+| XML self-closing (void) | `<br/>` → `xml_element('br/')` | **Experimental** |
+| XML empty non-void | `<div></div>` → `xml_element('div')` | **Experimental** |
+| XML multi-line dedent | Common whitespace prefix stripped | **Experimental** |
 | XML interpolation | `{expr}` inside XML content/attributes | **Experimental** |
 | XML subquery | `{SELECT <li>{name}</li> FROM t}` inside XML | **Experimental** |
 | XML namespaced tag | `<ui:Table.Cell>{v}</ui:Table.Cell>` | **Experimental** |
@@ -130,6 +132,8 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | FK-guided join | Uses explicit FK metadata (no convention fallback) | **Stable** |
 | Multi-column FK | AND-joined conditions | **Stable** |
 | Recursive select | `WITH RECURSIVE` 3-CTE bracket-injection template | **Experimental** |
+| XML void element | `xml_element('tag/')` → `<tag/>` (self-closing) | **Experimental** |
+| XML non-void element | `xml_element('tag')` → `<tag></tag>` (open+close) | **Experimental** |
 | XML element (top-level) | `CAST(xml_element('tag', xml_attrs(...), ...) AS TEXT)` | **Experimental** |
 | XML element (nested) | `xml_element(...)` (no CAST — BLOB consumed by parent) | **Experimental** |
 | XML inside JSON | `CAST(xml_element(...) AS TEXT)` at JSON boundary | **Experimental** |
@@ -203,8 +207,10 @@ Before 1.0:
   (`xml_element`, `xml_attrs`, `xml_agg`) are provided in `sqldeep_xml.h`/`.c`
   (v0.10.0). v0.11.0 switched from sentinel byte to BLOB type protocol —
   XML functions return BLOBs internally, transpiler emits `CAST(... AS TEXT)`
-  at top-level and JSON boundaries. Whitespace handling in XML body text is
-  literal (not stripped like JSX).
+  at top-level and JSON boundaries. v0.13.0 added self-closing/non-void
+  distinction (`xml_element('br/')` for void elements), empty non-void
+  rendering (`<div></div>` instead of `<div/>`), and multi-line dedent
+  (common whitespace prefix stripping).
 - **JSONML output settling**: New in v0.12.0. `xml_to_jsonml(...)` transpiler
   macro emits `xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg` calls that
   produce JSONML JSON arrays. Same BLOB protocol as XML functions.
