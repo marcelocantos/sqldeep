@@ -62,5 +62,5 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-04-05 — /release v0.11.0
 
-- **Commit**: `81be83a`
+- **Commit**: `1c02a67`
 - **Outcome**: Released v0.11.0. Replaced XML sentinel byte (`\x01`) with BLOB type protocol — XML functions return BLOBs, transpiler emits `CAST(... AS TEXT)` at boundaries. Fixes sentinel leak into JSON values. 362 assertions pass (58 test cases).
