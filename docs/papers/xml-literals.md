@@ -74,18 +74,20 @@ Produces `<tag [attrs]>children</tag>`.
 Self-closing: if there are no children, produces `<tag [attrs]/>`.
 
 The function must distinguish "raw XML from another xml_element call" from
-"plain text that needs escaping". Implementation options:
+"plain text that needs escaping". Implementation uses **BLOB type**: all
+XML output is returned as `BLOB` via `sqlite3_result_blob()`. Consumers
+check `sqlite3_value_type() == SQLITE_BLOB` to detect already-formed XML
+and pass it through without escaping. The transpiler emits
+`CAST(xml_element(...) AS TEXT)` at the top level and at JSON boundaries
+to convert the final result back to a string.
 
-1. **Sentinel prefix**: xml_element output starts with a marker byte
-   (e.g. `\x00`) that xml_element checks for. Stripped on final output.
-2. **SQLite subtype**: Use `sqlite3_result_subtype()` /
-   `sqlite3_value_subtype()` to tag XML results with a subtype (e.g. 88
-   for 'X'). xml_element checks the subtype to decide whether to escape.
-   This is the cleaner approach — subtypes were designed for exactly this
-   (the JSON1 extension uses subtype 74 for 'J').
+Alternatives considered and rejected:
 
-**Recommendation**: Use subtypes. This is how the built-in JSON functions
-distinguish "JSON value" from "text that happens to look like JSON".
+1. **Sentinel prefix** (`\x01`): Survives all string operations but leaks
+   into JSON values and requires manual stripping.
+2. **SQLite subtype**: Clean API (`sqlite3_result_subtype()` /
+   `sqlite3_value_subtype()`) but subtypes are stripped by `group_concat`
+   and other built-in string operations.
 
 #### `xml_attrs(name1, value1, name2, value2, ...)`
 
@@ -98,8 +100,7 @@ Produces ` name1="escaped_value1" name2="escaped_value2"`.
 - Boolean-like: if the value is the integer 1, emit the attribute name
   alone (e.g. `xml_attrs('celled', 1)` → ` celled`). If 0, omit it.
 
-Returns a string tagged with subtype (or sentinel) so xml_element knows
-not to escape it.
+Returns a BLOB so xml_element knows not to escape it.
 
 ### sqldeep transpilation
 
@@ -158,29 +159,10 @@ xml_element('ul',
    FROM items WHERE active))
 ```
 
-The `group_concat(..., '')` with no separator concatenates the XML fragments.
-Since each fragment is already tagged with the XML subtype, xml_element
-passes them through without escaping.
-
-**Open question**: Should the inner SELECT use `group_concat` or a custom
-`xml_group_concat` that preserves the subtype? Standard `group_concat`
-returns plain TEXT, losing the subtype. Options:
-
-1. Have `xml_element` check for strings that start with `<` and look
-   well-formed (fragile).
-2. Register `xml_agg(value)` — aggregate that concatenates XML-typed values
-   and preserves the subtype.
-3. Use the sentinel prefix approach instead of subtypes (survives
-   `group_concat`).
-
-**Recommendation**: Option 3 (sentinel) may be more practical since
-`group_concat` and other string operations strip subtypes. A sentinel
-byte like `\x00` would survive concatenation. xml_element strips it on
-input and adds it on output. The final top-level call strips the sentinel
-to produce clean XML.
-
-Alternatively, option 2 (custom `xml_agg`) is cleanest — three functions
-total: `xml_element`, `xml_attrs`, `xml_agg`.
+The inner SELECT uses a custom `xml_agg(value)` aggregate that
+concatenates XML-typed values (BLOBs) and returns a BLOB. This preserves
+the BLOB type through aggregation so xml_element can pass the result
+through without escaping.
 
 #### Self-closing elements
 
@@ -332,7 +314,7 @@ subscription fires with updated HTML.
 
 - XML literal syntax in sqldeep (`<tag>`, `{expr}`, `{SELECT ...}`)
 - `xml_element`, `xml_attrs` SQLite functions (C, registered on handle)
-- `xml_agg` aggregate function (or sentinel approach for group_concat)
+- `xml_agg` aggregate function
 - Self-closing elements, namespaced tags, boolean attributes
 - Escaping of text content and attribute values
 
@@ -347,9 +329,9 @@ subscription fires with updated HTML.
 
 ## Open questions
 
-1. **Sentinel vs subtype vs xml_agg**: Which approach for preserving
-   XML-typed values through aggregation? Sentinel is most robust;
-   xml_agg is cleanest; subtypes are fragile across string operations.
+1. ~~**Sentinel vs subtype vs xml_agg**~~: Resolved — using BLOB type
+   with `xml_agg` aggregate. BLOBs provide type-level distinction without
+   sentinel bytes, and `CAST(... AS TEXT)` at boundaries converts cleanly.
 
 2. **Ambiguity with JSON objects**: In `SELECT <td>{x}</td>`, the `{x}`
    is clearly interpolation. But what about `SELECT {x}` — is that a
