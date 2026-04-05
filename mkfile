@@ -6,6 +6,11 @@ cxxflags = -Wall -Wextra -Wpedantic
 vendor   = vendor
 incflags = -I. -Idist -I$vendor/include
 
+# Platform-dependent readline paths
+lazy os = $[shell uname -s]
+lazy rl_incflags = $[shell if [ "$os" = Darwin ]; then echo "-I/opt/homebrew/opt/readline/include"; fi]
+lazy rl_ldflags  = $[shell if [ "$os" = Darwin ]; then echo "-L/opt/homebrew/opt/readline/lib"; fi]
+
 # ── Static library ───────────────────────────────────────────────
 lib = build/libsqldeep.a
 
@@ -36,7 +41,7 @@ build/demo: build/examples/demo.o build/sqldeep.o
     $cxx $cxxflags -o $target $inputs
 
 build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqldeep_xml.o build/sqlite3.o
-    $cxx -o $target $inputs -L/opt/homebrew/opt/readline/lib -lreadline -lz
+    $cxx -o $target $inputs $rl_ldflags -lreadline -lz
 
 $lib: build/sqldeep.o
     libtool -static -o $target $inputs
@@ -58,4 +63,4 @@ build/examples/{name}.o: examples/{name}.cpp
     $cxx $cxxflags $incflags -c $input -o $target
 
 build/cmd/{name}.o: cmd/{name}.c
-    $cc -w $incflags -I$vendor/src -DHAVE_READLINE=1 -I/opt/homebrew/opt/readline/include -c $input -o $target
+    $cc -w $incflags -I$vendor/src -DHAVE_READLINE=1 $rl_incflags -c $input -o $target

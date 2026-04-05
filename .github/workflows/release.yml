@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            mk_arch: darwin-arm64
+            asset_suffix: darwin-arm64
+          - os: ubuntu-latest
+            mk_arch: linux-amd64
+            asset_suffix: linux-amd64
+          - os: ubuntu-24.04-arm
+            mk_arch: linux-arm64
+            asset_suffix: linux-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mk
+        run: |
+          MK_VERSION=$(gh release view --repo marcelocantos/mk --json tagName -q .tagName)
+          MK_VER=${MK_VERSION#v}
+          curl -fsSL "https://github.com/marcelocantos/mk/releases/download/${MK_VERSION}/mk-${MK_VER}-${{ matrix.mk_arch }}.tar.gz" \
+            | tar xz
+          sudo mv mk /usr/local/bin/mk
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libreadline-dev
+
+      - name: Run tests
+        run: mk test
+
+      - name: Build binary
+        run: mk shell
+
+      - name: Package
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          TARBALL="sqldeep-${VERSION}-${{ matrix.asset_suffix }}.tar.gz"
+          tar czf "$TARBALL" -C build sqldeep
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
+      - name: Upload to release
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ env.TARBALL }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  homebrew:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Justintime50/homebrew-releaser@v3
+        with:
+          homebrew_owner: marcelocantos
+          homebrew_tap: homebrew-tap
+          github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          formula_folder: Formula
+          version: ${{ github.event.release.tag_name }}
+          install: 'bin.install "sqldeep" => "sqldeep"'
+          target_darwin_arm64: true
+          target_linux_amd64: true
+          target_linux_arm64: true
+          test: 'system bin/"sqldeep", "--version"'
+          skip_checksum: true
+          update_readme_table: true
