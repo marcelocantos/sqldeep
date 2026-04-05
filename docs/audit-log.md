@@ -59,3 +59,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `fe5cdec`
 - **Outcome**: Released v0.10.0. Extracted XML SQLite functions (`xml_element`, `xml_attrs`, `xml_agg`) into shared `dist/sqldeep_xml.h`/`.c` with public `sqldeep_register_sqlite_xml()`. Go binding gains `RegisterSQLiteXML()`. Fixed `ar` → `libtool` for macOS archive alignment. 363 assertions pass (58 test cases).
+
+## 2026-04-05 — /release v0.11.0
+
+- **Commit**: `81be83a`
+- **Outcome**: Released v0.11.0. Replaced XML sentinel byte (`\x01`) with BLOB type protocol — XML functions return BLOBs, transpiler emits `CAST(... AS TEXT)` at boundaries. Fixes sentinel leak into JSON values. 362 assertions pass (58 test cases).
