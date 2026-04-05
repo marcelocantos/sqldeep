@@ -54,6 +54,21 @@ convention:
     expected: "SELECT json_object('vals', json_array(a + 1, b * 2)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('vals', jsonb_build_array(a + 1, b * 2)) FROM t"
 
+  # Object/array literals inside function calls (any paren depth)
+  - name: object literal inside function call
+    input: "SELECT json_group_array({name, value}) FROM t"
+    expected: "SELECT json_group_array(json_object('name', name, 'value', value)) FROM t"
+    expected_postgres: "SELECT json_group_array(jsonb_build_object('name', name, 'value', value)) FROM t"
+
+  - name: array literal inside function call
+    input: "SELECT json_group_array([a, b]) FROM t"
+    expected: "SELECT json_group_array(json_array(a, b)) FROM t"
+    expected_postgres: "SELECT json_group_array(jsonb_build_array(a, b)) FROM t"
+
+  - name: object literal nested in parens
+    input: "SELECT coalesce(({name, value}), null) FROM t"
+    expected: "SELECT coalesce((json_object('name', name, 'value', value)), null) FROM t"
+
   # Expression with commas
   - name: expression with commas in parens
     input: "SELECT { result: coalesce(a, b) } FROM t"

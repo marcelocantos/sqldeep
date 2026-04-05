@@ -943,8 +943,9 @@ private:
                 }
             }
 
-            // Check for inline { or [ at depth 0
-            if (paren_depth == 0 && t.type == TokenType::LBrace) {
+            // Check for inline { or [ (object/array literals).
+            // Valid at any paren depth — e.g. json_group_array({name, value}).
+            if (t.type == TokenType::LBrace) {
                 flush_before(t);
                 auto obj = parse_object_literal(depth + 1);
                 parts.push_back(std::move(obj));
@@ -953,7 +954,7 @@ private:
                 continue;
             }
 
-            if (paren_depth == 0 && t.type == TokenType::LBracket) {
+            if (t.type == TokenType::LBracket) {
                 flush_before(t);
                 auto arr = parse_array_literal(depth + 1);
                 parts.push_back(std::move(arr));
