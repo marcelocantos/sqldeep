@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.13.0.
+Snapshot as of v0.14.0.
 
 ### C API (`sqldeep.h`)
 
@@ -106,8 +106,11 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | XML inside JSON | `{ card: <div>{name}</div> }` | **Experimental** |
 | JSON object inside XML | `<td>{{name, qty}}</td>` | **Experimental** |
 | Literal brace in XML | `{'{'}` | **Experimental** |
-| JSONML output | `xml_to_jsonml(<tag>...</tag>)` | **Experimental** |
-| JSONML subquery | `xml_to_jsonml(<ul>{SELECT ...}</ul>)` | **Experimental** |
+| JSON booleans | `{ active: true }` → `json('true')` auto-wrapping | **Experimental** |
+| JSONML output | `jsonml(<tag>...</tag>)` | **Experimental** |
+| JSONML subquery | `jsonml(<ul>{SELECT ...}</ul>)` | **Experimental** |
+| JSX output | `jsx(<tag>...</tag>)` | **Experimental** |
+| JSX subquery | `jsx(<ul>{SELECT ...}</ul>)` | **Experimental** |
 
 ### Output semantics
 
@@ -138,10 +141,17 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | XML element (nested) | `xml_element(...)` (no CAST — BLOB consumed by parent) | **Experimental** |
 | XML inside JSON | `CAST(xml_element(...) AS TEXT)` at JSON boundary | **Experimental** |
 | XML subquery aggregation | `xml_agg(xml_element(...))` | **Experimental** |
+| JSON boolean wrapping | Standalone `true`/`false` → `json('true')`/`json('false')` | **Experimental** |
+| Boolean attrs (XML) | `json('true')` → bare attr; `json('false')` → omit | **Experimental** |
+| Boolean attrs (JSX) | `json('true')` → `true` in attrs object | **Experimental** |
 | JSONML element (top-level) | `CAST(xml_element_jsonml(...) AS TEXT)` | **Experimental** |
 | JSONML element (nested) | `xml_element_jsonml(...)` (BLOB consumed by parent) | **Experimental** |
 | JSONML attrs | `xml_attrs_jsonml(...)` → `{"k":"v",...}` BLOB | **Experimental** |
 | JSONML subquery aggregation | `jsonml_agg(xml_element_jsonml(...))` | **Experimental** |
+| JSX element (top-level) | `CAST(xml_element_jsx(...) AS TEXT)` | **Experimental** |
+| JSX element (nested) | `xml_element_jsx(...)` (aliases `xml_element_jsonml`) | **Experimental** |
+| JSX attrs | `xml_attrs_jsx(...)` → preserves subtype-74 values as raw JSON | **Experimental** |
+| JSX subquery aggregation | `jsx_agg(...)` (aliases `jsonml_agg`) | **Experimental** |
 
 ### Parser behaviour
 
@@ -211,9 +221,16 @@ Before 1.0:
   distinction (`xml_element('br/')` for void elements), empty non-void
   rendering (`<div></div>` instead of `<div/>`), and multi-line dedent
   (common whitespace prefix stripping).
-- **JSONML output settling**: New in v0.12.0. `xml_to_jsonml(...)` transpiler
-  macro emits `xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg` calls that
-  produce JSONML JSON arrays. Same BLOB protocol as XML functions.
+- **JSONML output settling**: Introduced v0.12.0 as `xml_to_jsonml(...)`, renamed
+  to `jsonml(...)` in v0.14.0. Emits `xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg`
+  calls that produce JSONML JSON arrays. Same BLOB protocol as XML functions.
+- **JSX output mode settling**: New in v0.14.0. `jsx(...)` wrapper preserves
+  JSON-typed attribute values (objects, arrays, booleans) via SQLite subtype 74
+  detection in `xml_attrs_jsx`. Needs real-world usage to confirm the subtype
+  detection approach is robust.
+- **JSON boolean auto-wrapping settling**: New in v0.14.0. Standalone `true`/`false`
+  in JSON/XML value contexts auto-wrap as `json('true')`/`json('false')`.
+  Only applies to single-token values, not compound expressions.
 
 ## Known limitations
 
