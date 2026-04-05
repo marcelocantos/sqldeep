@@ -642,6 +642,89 @@ convention:
     expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
     expected_postgres: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, lpad(CAST(id AS text), 10, '0') FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || lpad(CAST(c.id AS text), 10, '0') FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, jsonb_build_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || chr(127), ']}' FROM _sdq_ranked) SELECT string_agg(_fragment, '' ORDER BY _sort_key) FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
 
+# ── XML literals ────────────────────────────────────────────────────
+
+  - name: xml static element
+    input: "<div>hello</div>"
+    expected: "xml_element('div', 'hello')"
+
+  - name: xml self-closing element
+    input: "<br/>"
+    expected: "xml_element('br')"
+
+  - name: xml static attribute
+    input: '<div class="card">text</div>'
+    expected: "xml_element('div', xml_attrs('class', 'card'), 'text')"
+
+  - name: xml dynamic attribute
+    input: "<span style={style_expr}>text</span>"
+    expected: "xml_element('span', xml_attrs('style', style_expr), 'text')"
+
+  - name: xml boolean attribute
+    input: "<input disabled/>"
+    expected: "xml_element('input', xml_attrs('disabled', 'disabled'))"
+
+  - name: xml multiple attributes
+    input: '<td class="cell" id={cell_id}>val</td>'
+    expected: "xml_element('td', xml_attrs('class', 'cell', 'id', cell_id), 'val')"
+
+  - name: xml interpolation
+    input: "<td>{property_address}</td>"
+    expected: "xml_element('td', property_address)"
+
+  - name: xml nested elements
+    input: "<div><span>text</span></div>"
+    expected: "xml_element('div', xml_element('span', 'text'))"
+
+  - name: xml mixed text and interpolation
+    input: "<td>Price: {amount}</td>"
+    expected: "xml_element('td', 'Price: ', amount)"
+
+  - name: xml nested subquery
+    input: |-
+      SELECT <ul>{SELECT <li>{name}</li> FROM items}</ul>
+    expected: "SELECT xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items))"
+
+  - name: xml self-closing with dynamic attr
+    input: "<img src={url}/>"
+    expected: "xml_element('img', xml_attrs('src', url))"
+
+  - name: xml namespaced tag
+    input: "<ui:Table.Cell>{value}</ui:Table.Cell>"
+    expected: "xml_element('ui:Table.Cell', value)"
+
+  - name: xml inside json
+    input: "SELECT { name, card: <div>{name}</div> } FROM items"
+    expected: "SELECT json_object('name', name, 'card', xml_element('div', name)) FROM items"
+
+  - name: xml json object inside interpolation
+    input: "<td>{{name, qty}}</td>"
+    expected: "xml_element('td', json_object('name', name, 'qty', qty))"
+
+  - name: xml json path inside interpolation
+    input: "<td>{(metadata).address}</td>"
+    expected: "xml_element('td', json_extract(metadata, '$.address'))"
+
+  - name: xml literal brace
+    input: "<td>{'{'}text{'}'}</td>"
+    expected: "xml_element('td', '{', 'text', '}')"
+
+  - name: xml in select
+    input: "SELECT <table><tr><th>Name</th></tr>{SELECT <tr><td>{name}</td></tr> FROM t}</table>"
+    expected: "SELECT xml_element('table', xml_element('tr', xml_element('th', 'Name')), (SELECT xml_agg(xml_element('tr', xml_element('td', name))) FROM t))"
+
+  - name: xml sql passthrough
+    input: "SELECT * FROM t WHERE x < 5"
+    expected: "SELECT * FROM t WHERE x < 5"
+
+  - name: xml with where clause in subquery
+    input: "<ul>{SELECT <li>{name}</li> FROM items WHERE active}</ul>"
+    expected: "xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items WHERE active))"
+
+  - name: xml singular subquery
+    input: "<div>{SELECT/1 <span>{name}</span> FROM t}</div>"
+    expected: "xml_element('div', (SELECT xml_element('span', name) FROM t LIMIT 1))"
+
 # ── FK-guided join resolution ────────────────────────────────────────
 
 fk:
@@ -758,6 +841,21 @@ errors:
 
   - name: recursive missing RECURSE
     input: "SELECT { id, children: * } FROM t WHERE parent_id IS NULL"
+
+  - name: xml mismatched closing tag
+    input: "<div>text</span>"
+
+  - name: xml unterminated element
+    input: "<div>text"
+
+  - name: xml unterminated self-closing
+    input: "<img /"
+
+  - name: xml unterminated attribute expr
+    input: "<div class={expr>text</div>"
+
+  - name: xml unterminated interpolation
+    input: "<div>{expr</div>"
 
 # ── FK-guided error cases ────────────────────────────────────────────
 

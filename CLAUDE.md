@@ -56,7 +56,10 @@ is standard and works unchanged across backends.
    `JoinPath` AST nodes supporting arbitrary chains with optional explicit
    column specifications. Detects `(expr).path` JSON path patterns during
    token accumulation using a paren-position stack, transforming them inline
-   to `json_extract()`/`jsonb_extract_path()` based on backend.
+   to `json_extract()`/`jsonb_extract_path()` based on backend. Detects
+   `<ident` as XML element start (unambiguous — `<` cannot start a SQL
+   expression) and dispatches to `parse_xml_element()` which uses
+   `read_raw_until_xml_special()` for body text between tags.
 
 5. **Renderer** — walks AST, emits standard SQL. Parameterised by `Backend`:
    JSON function names (`fn_object_`, `fn_array_`, `fn_group_array_`) are set
@@ -120,6 +123,19 @@ is standard and works unchanged across backends.
   → 3-CTE bracket-injection template producing nested JSON entirely within SQL
 - `RECURSE ON (fk = pk)` for explicit PK column (default: `id`)
 - `SELECT { ..., children: * } FROM t RECURSE ON (fk)` → forest output wrapped in `[]`
+- XML element: `<div class="card">{name}</div>` → `xml_element('div', xml_attrs('class', 'card'), name)`
+- XML self-closing: `<br/>` → `xml_element('br')`
+- XML interpolation: `{expr}` inside XML content or attributes
+- XML subquery: `{SELECT <li>{name}</li> FROM t}` inside XML
+  → `(SELECT xml_agg(xml_element('li', name)) FROM t)`
+- XML singular subquery: `{SELECT/1 <span>{name}</span> FROM t}`
+  → `(SELECT xml_element('span', name) FROM t LIMIT 1)`
+- XML namespaced tags: `<ui:Table.Cell>` → `xml_element('ui:Table.Cell', ...)`
+- XML boolean attribute: `<input disabled/>` → `xml_element('input', xml_attrs('disabled', 1))`
+- XML inside JSON: `{ card: <div>{name}</div> }` → `json_object('card', xml_element('div', name))`
+- JSON object inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object('name', name, 'qty', qty))`
+- JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
+- Literal brace in XML: `{'{'}` → `'{'`
 - `--` line comments stripped
 - `/* ... */` block comments stripped (flat, not nested)
 - Trailing commas allowed
@@ -151,7 +167,10 @@ mkfile                      Build system (mk)
   FROM-first variants (deep and plain), singular select (`SELECT/1`) variants,
   FK-guided joins (forward, reverse, chain, bridge, multi-column, error cases),
   recursive select (`RECURSE ON`) variants (basic tree, forest, explicit PK,
-  PostgreSQL backend)
+  PostgreSQL backend), XML literals (static elements, attributes, interpolation,
+  nested elements, subqueries, namespaced tags, self-closing, boolean attributes,
+  XML inside JSON, JSON object inside XML, JSON path inside XML, literal braces,
+  error cases)
 
 - `test_sqlite.cpp` — integration tests: transpile sqldeep syntax, execute the
   resulting SQL against an in-memory SQLite database, and verify the JSON output.
@@ -160,7 +179,9 @@ mkfile                      Build system (mk)
   grandchild chain, bridge join (many-to-many), FROM-first variants, singular
   select (`SELECT/1`), FK-guided joins (single and multi-column), JSON arrow
   operators (`->` / `->>`), recursive tree construction (singular, forest,
-  empty), and plain SQL passthrough.
+  empty), XML literals (static, dynamic attributes, interpolation, escaping,
+  nested, self-closing, boolean attrs, subquery aggregation, XML inside JSON,
+  empty subquery), and plain SQL passthrough.
 
 Add new tests to `test_transpile.cpp` or create new `test_*.cpp` files for
 focused component testing.

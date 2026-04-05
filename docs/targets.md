@@ -19,6 +19,24 @@
 - **Status**: blocked (settling period — need Experimental items to prove out)
 - **Discovered**: 2026-03-12
 
+### 🎯T3 XML/HTML literals produce well-formed markup directly from SQL queries
+- **Weight**: TBD
+- **Acceptance**:
+  - `<tag attr={expr}>...</tag>` transpiles to `xml_element('tag', xml_attrs('attr', expr), ...)` calls
+  - `{expr}` interpolation inside XML content and attributes
+  - `{SELECT ...}` nested subqueries inside XML with aggregation (`xml_agg` or sentinel)
+  - Self-closing elements, namespaced tags, boolean attributes
+  - XML literals valid inside JSON object fields (`{ name, card: <div>...</div> }`)
+  - JSON path navigation `(expr).path[n]` works inside XML interpolation
+  - `{{name, qty}}` produces JSON object inside XML (outer = interpolation, inner = object)
+  - Literal braces via `{'{'}` / `{'}'}`
+  - Both SQLite and PostgreSQL backends
+  - Transpilation tests and SQLite integration tests
+  - XML functions registered in sqlpipe (out of scope for sqldeep itself — sqldeep is string→string)
+- **Context**: Design paper at `docs/papers/xml-literals.md`. Motivated by sqlpipe reactive UI — single SQL expression produces query + component tree. Inspired by arr.ai AuctionFox demo.
+- **Status**: planned
+- **Discovered**: 2026-04-05
+
 ## Achieved
 
 ### 🎯T2 Recursive tree construction from self-referential tables
