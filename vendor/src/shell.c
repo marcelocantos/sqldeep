@@ -33364,6 +33364,12 @@ int SQLITE_CDECL wmain(int argc, wchar_t **wargv){
             sqlite3_libversion(), sqlite3_sourceid(), 8*(int)sizeof(char*));
 #endif
       return 0;
+#ifdef SQLDEEP_SHELL
+    }else if( cli_strcmp(z,"-help-agent")==0 ){
+      extern void sqldeep_print_agent_guide(void);
+      sqldeep_print_agent_guide();
+      return 0;
+#endif
     }else if( cli_strcmp(z,"-interactive")==0 ){
       /* Need to check for interactive override here to so that it can
       ** affect console setup (for Windows only) and testing thereof.

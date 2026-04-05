@@ -22,6 +22,15 @@ void sqldeep_shell_init(void) {
     sqlite3_initialize();
 }
 
+// ── Agent guide (embedded from dist/sqldeep-agents-guide.md) ───────
+
+#include <stdio.h>
+#include "sqldeep_agent_guide.inc"
+
+void sqldeep_print_agent_guide(void) {
+    fputs(sd_agent_guide, stdout);
+}
+
 // ── Include the SQLite shell with sqldeep hooks enabled ────────────
 
 #define SQLDEEP_SHELL

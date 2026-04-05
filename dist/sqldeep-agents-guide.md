@@ -130,13 +130,21 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - XML subquery: `{SELECT <li>{name}</li> FROM t}` → `(SELECT xml_agg(xml_element('li', name)) FROM t)`
 - XML singular subquery: `{SELECT/1 <span>{name}</span> FROM t}` → `(SELECT xml_element(...) FROM t LIMIT 1)`
 - XML namespaced tags: `<ui:Table.Cell>` → `xml_element('ui:Table.Cell', ...)`
-- XML boolean attribute: `<input disabled/>` → `xml_attrs('disabled', 'disabled')`
+- XML boolean attribute: `<input disabled/>` → `xml_attrs('disabled', json('true'))`.
+  Uses `json('true')`/`json('false')` (subtype 74) to distinguish booleans from integers.
 - XML inside JSON: `{ card: <div>{name}</div> }` → `json_object('card', CAST(xml_element(...) AS TEXT))`
 - JSON inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object(...))`
 - JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
 - Literal brace in XML: `{'{'}` → `'{'`
-- JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`
-- JSONML subquery: `xml_to_jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
+- JSON booleans: standalone `true`/`false` in JSON object fields, array elements,
+  and XML attribute/interpolation contexts are auto-wrapped as `json('true')`/`json('false')`
+  to preserve proper JSON boolean semantics (not integer 1/0).
+- JSONML output: `jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`
+- JSONML subquery: `jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
+- JSX output: `jsx(<Graph data={{x, y}} label="Sales"/>)` → `CAST(xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object(...), 'label', 'Sales')) AS TEXT)`.
+  Like JSONML but preserves JSON-typed attribute values (subtype 74) as raw JSON
+  in the attributes object. Boolean attributes (`<input disabled/>`) produce `{"disabled":true}` in JSX mode.
+- JSX subquery: `jsx(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsx_agg`
 - `--` line comments and `/* ... */` block comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }`, `[ ]`, or `<tag>` constructs passes through unchanged.

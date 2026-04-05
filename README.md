@@ -211,7 +211,8 @@ SELECT <table class="products">
 - `{SELECT/1 ...}` singular subquery (no aggregation, adds `LIMIT 1`)
 - Self-closing void elements: `<br/>`, `<img src={url}/>` — rendered as `<br/>` (never `<br></br>`)
 - Non-void empty elements: `<div></div>` — rendered as `<div></div>` (never `<div/>`)
-- Boolean attributes: `<input disabled/>` → `disabled="disabled"`
+- Boolean attributes: `<input disabled/>` — uses `json('true')` to distinguish
+  booleans from integers. In XML mode renders as `disabled`, in JSX mode as `true`.
 - Namespaced tags: `<ui:Table.Cell>` for component frameworks
 - Computed key: `{ (expr): val }` → `json_object(expr, val)` (runtime key)
 - XML inside JSON: `{ name, card: <div>{name}</div> }` — XML expression as field value
@@ -220,25 +221,42 @@ SELECT <table class="products">
 - Literal braces: `{'{'}` for a literal `{`
 - Multi-line dedent: common leading whitespace is stripped, so source indentation
   produces relative indentation in output
-- JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` → `["div",{"class":"card"},"alice"]`
+- JSON booleans: standalone `true`/`false` in JSON object fields, array elements,
+  and XML contexts are auto-wrapped as `json('true')`/`json('false')` to preserve
+  proper JSON boolean semantics (emits `true`/`false` not `1`/`0`)
 
-#### JSONML output
+#### Output modes
 
-Wrap any XML literal in `xml_to_jsonml(...)` to produce
+Three output modes via pseudo-function wrappers:
+
+| Syntax | Attribute values | Use case |
+|---|---|---|
+| `<div>...</div>` | Always strings (HTML) | Server-rendered HTML |
+| `jsonml(<div>...</div>)` | Always strings | Structural JSONML format |
+| `jsx(<div>...</div>)` | JSON-valued attrs preserved | Component rendering (React, etc.) |
+
+**JSONML** — wraps XML in `jsonml(...)` to produce
 [JSONML](http://www.jsonml.org/) arrays instead of XML strings:
 
 ```sql
-SELECT xml_to_jsonml(
+SELECT jsonml(
   <ul>{SELECT <li>{name}</li> FROM items ORDER BY name}</ul>
 )
 -- → ["ul",["li","apple"],["li","banana"]]
 ```
 
-This is a transpiler-level macro — no runtime XML parsing. The transpiler emits
-`xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg` calls that build JSON
-arrays directly.
+**JSX** — like JSONML, but preserves JSON-typed attribute values (objects,
+arrays, booleans) as live JSON instead of stringifying them:
 
-The XML functions (`xml_element`, `xml_attrs`, `xml_agg` and their `_jsonml`
+```sql
+SELECT jsx(<Graph data={{x, y}} animated/>)
+-- → ["Graph",{"data":{"x":1,"y":2},"animated":true}]
+```
+
+These are transpiler-level macros — no runtime XML parsing. The transpiler emits
+mode-specific function variants (`xml_element_jsonml`/`xml_element_jsx`, etc.).
+
+The XML functions (`xml_element`, `xml_attrs`, `xml_agg` and their `_jsonml`/`_jsx`
 counterparts) are runtime concerns — sqldeep only emits calls to them. The
 `sqldeep` CLI includes reference implementations for interactive use.
 
