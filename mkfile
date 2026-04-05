@@ -36,7 +36,7 @@ build/demo: build/examples/demo.o build/sqldeep.o
     $cxx $cxxflags -o $target $inputs
 
 build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqlite3.o
-    $cxx -o $target $inputs -lreadline -lz
+    $cxx -o $target $inputs -L/opt/homebrew/opt/readline/lib -lreadline -lz
 
 $lib: build/sqldeep.o
     ar rcs $target $inputs
@@ -55,4 +55,4 @@ build/examples/{name}.o: examples/{name}.cpp
     $cxx $cxxflags $incflags -c $input -o $target
 
 build/cmd/{name}.o: cmd/{name}.c
-    $cc -w $incflags -I$vendor/src -c $input -o $target
+    $cc -w $incflags -I$vendor/src -DHAVE_READLINE=1 -I/opt/homebrew/opt/readline/include -c $input -o $target
