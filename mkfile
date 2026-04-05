@@ -29,21 +29,24 @@ test_objs = $[patsubst %.cpp,build/%.o,$test_srcs]
 
 # ── Binaries ─────────────────────────────────────────────────────────
 # Tests link sqlite3 for integration tests; the library itself does not.
-build/sqldeep_tests: $test_objs build/sqldeep.o build/sqlite3.o
+build/sqldeep_tests: $test_objs build/sqldeep.o build/sqldeep_xml.o build/sqlite3.o
     $cxx $cxxflags -o $target $inputs
 
 build/demo: build/examples/demo.o build/sqldeep.o
     $cxx $cxxflags -o $target $inputs
 
-build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqlite3.o
+build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqldeep_xml.o build/sqlite3.o
     $cxx -o $target $inputs -L/opt/homebrew/opt/readline/lib -lreadline -lz
 
 $lib: build/sqldeep.o
-    ar rcs $target $inputs
+    libtool -static -o $target $inputs
 
 # ── Compilation rules ────────────────────────────────────────────────
 build/sqldeep.o: dist/sqldeep.cpp dist/sqldeep.h
     $cxx $cxxflags $incflags -c $input -o $target
+
+build/sqldeep_xml.o: dist/sqldeep_xml.c dist/sqldeep_xml.h
+    $cc -w $incflags -c $input -o $target
 
 build/sqlite3.o: $vendor/src/sqlite3.c
     $cc -w -c $input -o $target

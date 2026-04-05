@@ -11,6 +11,19 @@ compile as C++20.
 No link-time dependencies — the database is only needed at runtime by the
 *caller*, not by sqldeep itself.
 
+If your project uses XML literals and targets SQLite, also include
+`sqldeep_xml.h` and `sqldeep_xml.c`. These provide the `xml_element`,
+`xml_attrs`, and `xml_agg` SQLite functions that the transpiled SQL calls:
+
+```c
+#include "sqldeep_xml.h"
+
+sqldeep_register_sqlite_xml(db);  // call once per connection
+```
+
+`sqldeep_xml.c` compiles as C (not C++20) and requires `sqlite3.h` at compile
+time and the SQLite library at link time.
+
 ## API
 
 The public interface is a C header (`sqldeep.h`), usable from C/C++ or via FFI:
@@ -55,9 +68,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "0.9.0"
+SQLDEEP_VERSION       // "0.10.0"
 SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 9
+SQLDEEP_VERSION_MINOR // 10
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```

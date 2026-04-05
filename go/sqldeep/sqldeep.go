@@ -4,6 +4,7 @@
 package sqldeep
 
 //#include "sqldeep.h"
+//#include "sqldeep_xml.h"
 //#include <stdlib.h>
 import "C"
 import "unsafe"
@@ -147,6 +148,17 @@ func TranspileFKBackend(input string, fks []ForeignKey, backend Backend) (string
 // TranspileFKPostgres is a convenience wrapper for TranspileFKBackend with Postgres.
 func TranspileFKPostgres(input string, fks []ForeignKey) (string, error) {
 	return TranspileFKBackend(input, fks, Postgres)
+}
+
+// RegisterSQLiteXML registers the xml_element, xml_attrs, and xml_agg
+// functions on a SQLite connection. The db parameter must be an unsafe.Pointer
+// to a C sqlite3* handle (e.g. obtained from a Go SQLite driver).
+func RegisterSQLiteXML(db unsafe.Pointer) error {
+	rc := C.sqldeep_register_sqlite_xml((*C.sqlite3)(db))
+	if rc != 0 {
+		return &Error{Msg: "failed to register XML functions"}
+	}
+	return nil
 }
 
 // Version returns the sqldeep library version string.
