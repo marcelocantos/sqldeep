@@ -781,53 +781,48 @@ convention:
     input: "<div><span>text</span></div>"
     expected: "CAST(xml_element('div', xml_element('span', 'text')) AS TEXT)"
 
-# ── JSONML (xml_to_jsonml) ──────────────────────────────────────────
+# ── JSONML (jsonml) ──────────────────────────────────────────
 
   - name: jsonml static element
-    input: "xml_to_jsonml(<div>hello</div>)"
+    input: "jsonml(<div>hello</div>)"
     expected: "CAST(xml_element_jsonml('div', 'hello') AS TEXT)"
 
   - name: jsonml self-closing
-    input: "xml_to_jsonml(<br/>)"
+    input: "jsonml(<br/>)"
     expected: "CAST(xml_element_jsonml('br/') AS TEXT)"
 
   - name: jsonml with attributes
-    input: 'xml_to_jsonml(<div class="card">text</div>)'
+    input: 'jsonml(<div class="card">text</div>)'
     expected: "CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), 'text') AS TEXT)"
 
   - name: jsonml dynamic attribute
-    input: "xml_to_jsonml(<span style={style_expr}>text</span>)"
+    input: "jsonml(<span style={style_expr}>text</span>)"
     expected: "CAST(xml_element_jsonml('span', xml_attrs_jsonml('style', style_expr), 'text') AS TEXT)"
 
   - name: jsonml interpolation
-    input: "xml_to_jsonml(<td>{property_address}</td>)"
+    input: "jsonml(<td>{property_address}</td>)"
     expected: "CAST(xml_element_jsonml('td', property_address) AS TEXT)"
 
   - name: jsonml nested elements
-    input: "xml_to_jsonml(<div><span>text</span></div>)"
+    input: "jsonml(<div><span>text</span></div>)"
     expected: "CAST(xml_element_jsonml('div', xml_element_jsonml('span', 'text')) AS TEXT)"
 
   - name: jsonml nested subquery
     input: |-
-      SELECT xml_to_jsonml(<ul>{SELECT <li>{name}</li> FROM items}</ul>)
+      SELECT jsonml(<ul>{SELECT <li>{name}</li> FROM items}</ul>)
     expected: "SELECT CAST(xml_element_jsonml('ul', (SELECT jsonml_agg(xml_element_jsonml('li', name)) FROM items)) AS TEXT)"
 
   - name: jsonml singular subquery
-    input: "xml_to_jsonml(<div>{SELECT/1 <span>{name}</span> FROM t}</div>)"
+    input: "jsonml(<div>{SELECT/1 <span>{name}</span> FROM t}</div>)"
     expected: "CAST(xml_element_jsonml('div', (SELECT xml_element_jsonml('span', name) FROM t LIMIT 1)) AS TEXT)"
 
   - name: jsonml inside json
-    input: "SELECT { name, card: xml_to_jsonml(<div>{name}</div>) } FROM items"
+    input: "SELECT { name, card: jsonml(<div>{name}</div>) } FROM items"
     expected: "SELECT json_object('name', name, 'card', CAST(xml_element_jsonml('div', name) AS TEXT)) FROM items"
 
   - name: jsonml sql passthrough
     input: "SELECT * FROM t WHERE x < 5"
     expected: "SELECT * FROM t WHERE x < 5"
-
-  # jsonml() short form (alias for xml_to_jsonml)
-  - name: jsonml short form
-    input: "jsonml(<div>hello</div>)"
-    expected: "CAST(xml_element_jsonml('div', 'hello') AS TEXT)"
 
 # ── JSX mode ────────────────────────────────────────────────────────
 

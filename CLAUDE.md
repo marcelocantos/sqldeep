@@ -144,9 +144,8 @@ is standard and works unchanged across backends.
 - JSON booleans: standalone `true`/`false` in JSON object fields, array elements, and
   XML attribute/interpolation contexts are auto-wrapped as `json('true')`/`json('false')`
   to preserve proper JSON boolean semantics (not integer 1/0).
-- JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` or
-  `jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`. Transpiler macro — emits `_jsonml` variant functions.
-- JSONML subquery: `xml_to_jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
+- JSONML output: `jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`. Transpiler macro — emits `_jsonml` variant functions.
+- JSONML subquery: `jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
 - JSX output: `jsx(<Graph data={{x, y}} label="Sales"/>)` →
   `CAST(xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object('x', x, 'y', y), 'label', 'Sales')) AS TEXT)`.
   Like JSONML but preserves JSON-typed attribute values (subtype 74) as raw JSON

@@ -981,9 +981,9 @@ private:
                 continue;
             }
 
-            // Check for jsx(<...>), jsonml(<...>), xml_to_jsonml(<...>)
+            // Check for jsx(<...>), jsonml(<...>)
             if (t.type == TokenType::Ident &&
-                (t.text == "jsx" || t.text == "jsonml" || t.text == "xml_to_jsonml")) {
+                (t.text == "jsx" || t.text == "jsonml")) {
                 XmlMode wrapper_mode = (t.text == "jsx") ? XmlMode::Jsx : XmlMode::Jsonml;
                 auto st = lex_.save();
                 lex_.next(); // consume wrapper name
