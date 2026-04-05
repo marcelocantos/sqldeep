@@ -435,6 +435,22 @@ static void xml_dedent(XmlElement& el) {
     if (n > 0 && n < INT_MAX) xml_strip_indent(el, n);
 }
 
+// In JSON/XML value contexts, wrap a standalone true/false token as
+// json('true')/json('false') so it carries JSON boolean semantics
+// (SQLite subtype 74) rather than collapsing to integer 1/0.
+static void wrap_json_bool(SqlParts& parts) {
+    if (parts.size() != 1) return;
+    auto* s = std::get_if<std::string>(&parts[0]);
+    if (!s || s->size() < 4 || s->size() > 5) return;
+    // Case-insensitive check
+    std::string lower;
+    lower.reserve(s->size());
+    for (char c : *s)
+        lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (lower == "true")       *s = "json('true')";
+    else if (lower == "false") *s = "json('false')";
+}
+
 // ── Parser ──────────────────────────────────────────────────────────
 
 static bool is_keyword(const Token& t, const char* kw) {
@@ -1347,6 +1363,7 @@ private:
                     if (field.value.empty())
                         lex_.error("expected expression after 'SELECT'",
                                    t2.line, t2.col);
+                    wrap_json_bool(field.value);
                     return field;
                 }
                 // SELECT {/[ — restore and fall through to normal parsing
@@ -1360,6 +1377,7 @@ private:
                                           depth);
             if (field.value.empty())
                 lex_.error("expected expression after ':'", t.line, t.col);
+            wrap_json_bool(field.value);
         }
 
         return field;
@@ -1386,6 +1404,7 @@ private:
                                         depth);
             if (elem.empty())
                 lex_.error("expected expression in array literal");
+            wrap_json_bool(elem);
             arr->elements.push_back(std::move(elem));
 
             t = lex_.peek();
@@ -1495,6 +1514,7 @@ private:
                 if (rb.type != TokenType::RBrace)
                     lex_.error("expected '}' after attribute expression",
                                rb.line, rb.col);
+                wrap_json_bool(expr);
                 el->attrs.push_back({attr_name, std::move(expr), true});
             } else {
                 lex_.error("expected '\"...' or '{...}' after '='",
@@ -1677,6 +1697,7 @@ private:
                 if (rb.type != TokenType::RBrace)
                     lex_.error("expected '}' after interpolation",
                                rb.line, rb.col);
+                wrap_json_bool(expr);
                 XmlElement::Child child;
                 child.kind = XmlElement::Child::Interpolation;
                 child.expr = std::move(expr);

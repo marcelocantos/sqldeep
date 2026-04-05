@@ -54,6 +54,23 @@ convention:
     expected: "SELECT json_object('vals', json_array(a + 1, b * 2)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('vals', jsonb_build_array(a + 1, b * 2)) FROM t"
 
+  # Boolean values in JSON context
+  - name: true in object field
+    input: "SELECT { active: true } FROM t"
+    expected: "SELECT json_object('active', json('true')) FROM t"
+
+  - name: false in object field
+    input: "SELECT { active: false } FROM t"
+    expected: "SELECT json_object('active', json('false')) FROM t"
+
+  - name: true and false in array
+    input: "SELECT { flags: [true, false, 1] } FROM t"
+    expected: "SELECT json_object('flags', json_array(json('true'), json('false'), 1)) FROM t"
+
+  - name: true in compound expression not wrapped
+    input: "SELECT { active: x OR true } FROM t"
+    expected: "SELECT json_object('active', x OR true) FROM t"
+
   # Object/array literals inside function calls (any paren depth)
   - name: object literal inside function call
     input: "SELECT json_group_array({name, value}) FROM t"
@@ -682,6 +699,18 @@ convention:
   - name: xml boolean attribute
     input: "<input disabled/>"
     expected: "CAST(xml_element('input/', xml_attrs('disabled', json('true'))) AS TEXT)"
+
+  - name: xml dynamic boolean attribute true
+    input: "<input checked={true}/>"
+    expected: "CAST(xml_element('input/', xml_attrs('checked', json('true'))) AS TEXT)"
+
+  - name: xml dynamic boolean attribute false
+    input: "<input checked={false}/>"
+    expected: "CAST(xml_element('input/', xml_attrs('checked', json('false'))) AS TEXT)"
+
+  - name: xml interpolation true
+    input: "<td>{true}</td>"
+    expected: "CAST(xml_element('td', json('true')) AS TEXT)"
 
   - name: xml multiple attributes
     input: '<td class="cell" id={cell_id}>val</td>'

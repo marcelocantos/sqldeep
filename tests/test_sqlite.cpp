@@ -868,6 +868,30 @@ TEST_CASE("sqlite: json -> operator in WHERE") {
     CHECK(rows[0] == R"({"id":1})");
 }
 
+// ── JSON booleans ──────────────────────────────────────────────────
+
+TEST_CASE("sqlite: true/false in json object") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY)");
+    exec(g.db, "INSERT INTO t VALUES(1)");
+
+    auto rows = transpile_and_query(g.db,
+        "SELECT { id, active: true, deleted: false } FROM t");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"id":1,"active":true,"deleted":false})");
+}
+
+TEST_CASE("sqlite: true/false in json array") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY)");
+    exec(g.db, "INSERT INTO t VALUES(1)");
+
+    auto rows = transpile_and_query(g.db,
+        "SELECT { flags: [true, false, 1] } FROM t");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"flags":[true,false,1]})");
+}
+
 // ── Recursive select ────────────────────────────────────────────────
 
 TEST_CASE("sqlite: recursive tree") {
