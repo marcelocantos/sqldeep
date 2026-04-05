@@ -2136,6 +2136,7 @@ private:
 
         out += fn_element;
         out += el.tag;
+        if (el.self_closing) out += "/";
         out += "'";
 
         // Attributes

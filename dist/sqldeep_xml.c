@@ -98,6 +98,8 @@ static void sd_xml_element(sqlite3_context *ctx, int argc,
     }
     const char *tag = (const char *)sqlite3_value_text(argv[0]);
     int taglen = (int)strlen(tag);
+    int self_closing = (taglen > 0 && tag[taglen - 1] == '/');
+    if (self_closing) taglen--; /* strip trailing '/' from tag name */
     const char *attrs = "";
     int attrslen = 0;
     int child_start = 1;
@@ -125,9 +127,11 @@ static void sd_xml_element(sqlite3_context *ctx, int argc,
         }
     }
 
-    /* <tag attrs> children </tag> + NUL */
+    /* <tag attrs> children </tag> or <tag attrs/> + NUL */
     int outlen = 1 + taglen + attrslen +
-                 (has_children ? 1 + children_len + 2 + taglen + 1 : 2) + 1;
+                 (self_closing ? 2
+                  : has_children ? 1 + children_len + 2 + taglen + 1
+                  : 1 + 2 + taglen + 1) + 1;
     char *out = (char *)sqlite3_malloc(outlen);
     if (!out) { sqlite3_result_error_nomem(ctx); return; }
     int pos = 0;
@@ -135,7 +139,10 @@ static void sd_xml_element(sqlite3_context *ctx, int argc,
     memcpy(out + pos, tag, taglen); pos += taglen;
     memcpy(out + pos, attrs, attrslen); pos += attrslen;
 
-    if (has_children) {
+    if (self_closing) {
+        out[pos++] = '/';
+        out[pos++] = '>';
+    } else if (has_children) {
         out[pos++] = '>';
         for (int i = child_start; i < argc; ++i) {
             if (sqlite3_value_type(argv[i]) == SQLITE_NULL) continue;
@@ -153,7 +160,10 @@ static void sd_xml_element(sqlite3_context *ctx, int argc,
         memcpy(out + pos, tag, taglen); pos += taglen;
         out[pos++] = '>';
     } else {
+        out[pos++] = '>';
+        out[pos++] = '<';
         out[pos++] = '/';
+        memcpy(out + pos, tag, taglen); pos += taglen;
         out[pos++] = '>';
     }
     out[pos] = '\0';
@@ -313,6 +323,7 @@ static void sd_xml_element_jsonml(sqlite3_context *ctx, int argc,
     }
     const char *tag = (const char *)sqlite3_value_text(argv[0]);
     int taglen = (int)strlen(tag);
+    if (taglen > 0 && tag[taglen - 1] == '/') taglen--; /* strip void marker */
     int child_start = 1;
     const char *attrs = NULL;
     int attrslen = 0;

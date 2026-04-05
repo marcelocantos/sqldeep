@@ -1028,6 +1028,12 @@ TEST_CASE("sqlite: xml self-closing") {
     CHECK(result == "<br/>");
 }
 
+TEST_CASE("sqlite: xml empty non-void element") {
+    DbGuardXml g;
+    auto result = xml_query(g.db, "SELECT <div></div>");
+    CHECK(result == "<div></div>");
+}
+
 TEST_CASE("sqlite: xml boolean attribute") {
     DbGuardXml g;
     auto result = xml_query(g.db, "SELECT <input disabled/>");

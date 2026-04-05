@@ -650,7 +650,11 @@ convention:
 
   - name: xml self-closing element
     input: "<br/>"
-    expected: "CAST(xml_element('br') AS TEXT)"
+    expected: "CAST(xml_element('br/') AS TEXT)"
+
+  - name: xml empty non-void element
+    input: "<div></div>"
+    expected: "CAST(xml_element('div') AS TEXT)"
 
   - name: xml static attribute
     input: '<div class="card">text</div>'
@@ -662,7 +666,7 @@ convention:
 
   - name: xml boolean attribute
     input: "<input disabled/>"
-    expected: "CAST(xml_element('input', xml_attrs('disabled', 'disabled')) AS TEXT)"
+    expected: "CAST(xml_element('input/', xml_attrs('disabled', 'disabled')) AS TEXT)"
 
   - name: xml multiple attributes
     input: '<td class="cell" id={cell_id}>val</td>'
@@ -687,7 +691,7 @@ convention:
 
   - name: xml self-closing with dynamic attr
     input: "<img src={url}/>"
-    expected: "CAST(xml_element('img', xml_attrs('src', url)) AS TEXT)"
+    expected: "CAST(xml_element('img/', xml_attrs('src', url)) AS TEXT)"
 
   - name: xml namespaced tag
     input: "<ui:Table.Cell>{value}</ui:Table.Cell>"
@@ -733,7 +737,7 @@ convention:
 
   - name: jsonml self-closing
     input: "xml_to_jsonml(<br/>)"
-    expected: "CAST(xml_element_jsonml('br') AS TEXT)"
+    expected: "CAST(xml_element_jsonml('br/') AS TEXT)"
 
   - name: jsonml with attributes
     input: 'xml_to_jsonml(<div class="card">text</div>)'
