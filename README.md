@@ -216,10 +216,27 @@ SELECT <table class="products">
 - JSON inside XML: `<td>{{name, qty}}</td>` — double braces for JSON object interpolation
 - JSON path in XML: `<td>{(data).field}</td>` — existing path syntax works inside interpolation
 - Literal braces: `{'{'}` for a literal `{`
+- JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` → `["div",{"class":"card"},"alice"]`
 
-The XML functions (`xml_element`, `xml_attrs`, `xml_agg`) are runtime concerns —
-sqldeep only emits calls to them. The `sqldeep` CLI includes reference
-implementations for interactive use.
+#### JSONML output
+
+Wrap any XML literal in `xml_to_jsonml(...)` to produce
+[JSONML](http://www.jsonml.org/) arrays instead of XML strings:
+
+```sql
+SELECT xml_to_jsonml(
+  <ul>{SELECT <li>{name}</li> FROM items ORDER BY name}</ul>
+)
+-- → ["ul",["li","apple"],["li","banana"]]
+```
+
+This is a transpiler-level macro — no runtime XML parsing. The transpiler emits
+`xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg` calls that build JSON
+arrays directly.
+
+The XML functions (`xml_element`, `xml_attrs`, `xml_agg` and their `_jsonml`
+counterparts) are runtime concerns — sqldeep only emits calls to them. The
+`sqldeep` CLI includes reference implementations for interactive use.
 
 ### Comments and trailing commas
 

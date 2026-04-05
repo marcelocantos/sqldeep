@@ -104,6 +104,8 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | XML inside JSON | `{ card: <div>{name}</div> }` | **Experimental** |
 | JSON object inside XML | `<td>{{name, qty}}</td>` | **Experimental** |
 | Literal brace in XML | `{'{'}` | **Experimental** |
+| JSONML output | `xml_to_jsonml(<tag>...</tag>)` | **Experimental** |
+| JSONML subquery | `xml_to_jsonml(<ul>{SELECT ...}</ul>)` | **Experimental** |
 
 ### Output semantics
 
@@ -132,6 +134,10 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | XML element (nested) | `xml_element(...)` (no CAST — BLOB consumed by parent) | **Experimental** |
 | XML inside JSON | `CAST(xml_element(...) AS TEXT)` at JSON boundary | **Experimental** |
 | XML subquery aggregation | `xml_agg(xml_element(...))` | **Experimental** |
+| JSONML element (top-level) | `CAST(xml_element_jsonml(...) AS TEXT)` | **Experimental** |
+| JSONML element (nested) | `xml_element_jsonml(...)` (BLOB consumed by parent) | **Experimental** |
+| JSONML attrs | `xml_attrs_jsonml(...)` → `{"k":"v",...}` BLOB | **Experimental** |
+| JSONML subquery aggregation | `jsonml_agg(xml_element_jsonml(...))` | **Experimental** |
 
 ### Parser behaviour
 
@@ -199,6 +205,9 @@ Before 1.0:
   XML functions return BLOBs internally, transpiler emits `CAST(... AS TEXT)`
   at top-level and JSON boundaries. Whitespace handling in XML body text is
   literal (not stripped like JSX).
+- **JSONML output settling**: New in v0.12.0. `xml_to_jsonml(...)` transpiler
+  macro emits `xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg` calls that
+  produce JSONML JSON arrays. Same BLOB protocol as XML functions.
 
 ## Known limitations
 
