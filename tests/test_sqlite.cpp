@@ -7,6 +7,7 @@
 #include <doctest.h>
 #include <sqlite3.h>
 #include "sqldeep.h"
+#include "sqldeep_xml.h"
 
 #include <memory>
 #include <stdexcept>
@@ -95,177 +96,13 @@ std::vector<std::string> transpile_and_query(
     return query(db, sql);
 }
 
-// ── XML function implementations for integration testing ────────────
-//
-// These are minimal implementations of xml_element, xml_attrs, and xml_agg
-// sufficient for verifying that transpiled XML queries produce correct output.
-// Production implementations would live in sqlpipe.
-//
-// Sentinel approach: XML output is prefixed with '\x01' so xml_element can
-// distinguish "already-XML" children (pass through) from plain text (escape).
-
-static const char kXmlSentinel = '\x01';
-
-static bool is_xml_sentinel(const char* s) {
-    return s && s[0] == kXmlSentinel;
-}
-
-static std::string xml_escape_text(const char* s) {
-    std::string out;
-    for (; *s; ++s) {
-        switch (*s) {
-        case '<': out += "&lt;"; break;
-        case '>': out += "&gt;"; break;
-        case '&': out += "&amp;"; break;
-        default:  out += *s; break;
-        }
-    }
-    return out;
-}
-
-static std::string xml_escape_attr(const char* s) {
-    std::string out;
-    for (; *s; ++s) {
-        switch (*s) {
-        case '"': out += "&quot;"; break;
-        case '<': out += "&lt;"; break;
-        case '>': out += "&gt;"; break;
-        case '&': out += "&amp;"; break;
-        default:  out += *s; break;
-        }
-    }
-    return out;
-}
-
-// xml_attrs(name1, value1, name2, value2, ...)
-static void sqlite_xml_attrs(sqlite3_context* ctx, int argc,
-                              sqlite3_value** argv) {
-    if (argc % 2 != 0) {
-        sqlite3_result_error(ctx, "xml_attrs requires even number of args", -1);
-        return;
-    }
-    std::string out;
-    for (int i = 0; i < argc; i += 2) {
-        if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
-        const char* name = reinterpret_cast<const char*>(
-            sqlite3_value_text(argv[i]));
-        const char* val = reinterpret_cast<const char*>(
-            sqlite3_value_text(argv[i + 1]));
-        out += " ";
-        out += name;
-        out += "=\"";
-        out += xml_escape_attr(val);
-        out += "\"";
-    }
-    std::string result = std::string(1, kXmlSentinel) + out;
-    sqlite3_result_text(ctx, result.c_str(), -1, SQLITE_TRANSIENT);
-}
-
-// xml_element(tag, [attrs], ...children)
-static void sqlite_xml_element(sqlite3_context* ctx, int argc,
-                                sqlite3_value** argv) {
-    if (argc < 1) {
-        sqlite3_result_error(ctx, "xml_element requires at least 1 arg", -1);
-        return;
-    }
-    const char* tag = reinterpret_cast<const char*>(
-        sqlite3_value_text(argv[0]));
-    std::string attrs_str;
-    int child_start = 1;
-
-    // Check if first arg after tag is xml_attrs result.
-    // xml_attrs output starts with sentinel + space (e.g. "\x01 class=\"x\"").
-    // xml_element output starts with sentinel + '<'.
-    if (argc > 1) {
-        const char* a = reinterpret_cast<const char*>(
-            sqlite3_value_text(argv[1]));
-        if (is_xml_sentinel(a) && a[1] == ' ') {
-            attrs_str = a + 1; // strip sentinel, keep leading space
-            child_start = 2;
-        }
-    }
-
-    // Collect children
-    std::string children;
-    bool has_children = false;
-    for (int i = child_start; i < argc; ++i) {
-        if (sqlite3_value_type(argv[i]) == SQLITE_NULL) continue;
-        has_children = true;
-        const char* c = reinterpret_cast<const char*>(
-            sqlite3_value_text(argv[i]));
-        if (is_xml_sentinel(c)) {
-            children += c + 1; // already XML, strip sentinel
-        } else {
-            children += xml_escape_text(c);
-        }
-    }
-
-    std::string out;
-    out += kXmlSentinel;
-    out += "<";
-    out += tag;
-    out += attrs_str;
-    if (has_children) {
-        out += ">";
-        out += children;
-        out += "</";
-        out += tag;
-        out += ">";
-    } else {
-        out += "/>";
-    }
-
-    sqlite3_result_text(ctx, out.c_str(), -1, SQLITE_TRANSIENT);
-}
-
-// xml_agg: aggregate that concatenates XML fragments, preserving sentinel.
-struct XmlAggCtx {
-    std::string accum;
-};
-
-static void sqlite_xml_agg_step(sqlite3_context* ctx, int /*argc*/,
-                                 sqlite3_value** argv) {
-    if (sqlite3_value_type(argv[0]) == SQLITE_NULL) return;
-    auto** pp = reinterpret_cast<XmlAggCtx**>(
-        sqlite3_aggregate_context(ctx, sizeof(XmlAggCtx*)));
-    if (!*pp) *pp = new XmlAggCtx();
-    const char* v = reinterpret_cast<const char*>(sqlite3_value_text(argv[0]));
-    if (is_xml_sentinel(v)) {
-        (*pp)->accum += v + 1;
-    } else {
-        (*pp)->accum += xml_escape_text(v);
-    }
-}
-
-static void sqlite_xml_agg_final(sqlite3_context* ctx) {
-    auto** pp = reinterpret_cast<XmlAggCtx**>(
-        sqlite3_aggregate_context(ctx, 0));
-    if (!pp || !*pp) {
-        sqlite3_result_text(ctx, "", 0, SQLITE_STATIC);
-        return;
-    }
-    std::string result = std::string(1, kXmlSentinel) + (*pp)->accum;
-    sqlite3_result_text(ctx, result.c_str(), -1, SQLITE_TRANSIENT);
-    delete *pp;
-}
-
-static void register_xml_functions(sqlite3* db) {
-    sqlite3_create_function(db, "xml_element", -1, SQLITE_UTF8,
-                            nullptr, sqlite_xml_element, nullptr, nullptr);
-    sqlite3_create_function(db, "xml_attrs", -1, SQLITE_UTF8,
-                            nullptr, sqlite_xml_attrs, nullptr, nullptr);
-    sqlite3_create_function(db, "xml_agg", 1, SQLITE_UTF8,
-                            nullptr, nullptr,
-                            sqlite_xml_agg_step, sqlite_xml_agg_final);
-}
-
 // DbGuard variant with XML functions registered.
 struct DbGuardXml {
     sqlite3* db = nullptr;
     DbGuardXml() {
         if (sqlite3_open(":memory:", &db) != SQLITE_OK)
             throw std::runtime_error("failed to open :memory: db");
-        register_xml_functions(db);
+        sqldeep_register_sqlite_xml(db);
     }
     ~DbGuardXml() { if (db) sqlite3_close(db); }
     DbGuardXml(const DbGuardXml&) = delete;
@@ -288,7 +125,7 @@ std::string xml_query(sqlite3* db, const std::string& deep_sql) {
     auto rows = query(db, sql);
     // Strip sentinel from results
     for (auto& row : rows) {
-        if (!row.empty() && row[0] == kXmlSentinel)
+        if (!row.empty() && row[0] == '\x01')
             row = row.substr(1);
     }
     if (rows.size() != 1)

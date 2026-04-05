@@ -3,8 +3,8 @@
 
 package sqldeep
 
-//#cgo CFLAGS: -I${SRCDIR}/../../dist
-//#cgo LDFLAGS: ${SRCDIR}/../../build/libsqldeep.a -lstdc++
+//#cgo CFLAGS: -I${SRCDIR}/../../dist -I${SRCDIR}/../../vendor/include
+//#cgo LDFLAGS: ${SRCDIR}/../../build/libsqldeep.a ${SRCDIR}/../../build/sqldeep_xml.o ${SRCDIR}/../../build/sqlite3.o -lstdc++ -lz
 //#include "sqldeep.h"
 //#include <stdlib.h>
 import "C"
