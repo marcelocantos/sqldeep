@@ -190,6 +190,24 @@ static int print_row(void* /*data*/, int ncols, char** vals, char** /*cols*/) {
 }
 
 int main(int argc, char* argv[]) {
+    if (argc > 1 && (std::string(argv[1]) == "--version" ||
+                     std::string(argv[1]) == "-v")) {
+        std::cout << "sqldeep " << sqldeep_version()
+                  << " (SQLite " << sqlite3_libversion() << ")\n";
+        return 0;
+    }
+    if (argc > 1 && (std::string(argv[1]) == "--help" ||
+                     std::string(argv[1]) == "-h")) {
+        std::cerr << "Usage: sqldeep [database.db]\n"
+                  << "Interactive SQLite shell with sqldeep transpilation "
+                  << "and XML functions.\n"
+                  << "Default database: :memory:\n\n"
+                  << "Commands:\n"
+                  << "  .sql      Show transpiled SQL for next query\n"
+                  << "  .tables   List tables\n"
+                  << "  .quit     Exit\n";
+        return 0;
+    }
     const char* db_path = argc > 1 ? argv[1] : ":memory:";
 
     sqlite3* db = nullptr;
