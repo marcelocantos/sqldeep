@@ -646,72 +646,72 @@ convention:
 
   - name: xml static element
     input: "<div>hello</div>"
-    expected: "xml_element('div', 'hello')"
+    expected: "CAST(xml_element('div', 'hello') AS TEXT)"
 
   - name: xml self-closing element
     input: "<br/>"
-    expected: "xml_element('br')"
+    expected: "CAST(xml_element('br') AS TEXT)"
 
   - name: xml static attribute
     input: '<div class="card">text</div>'
-    expected: "xml_element('div', xml_attrs('class', 'card'), 'text')"
+    expected: "CAST(xml_element('div', xml_attrs('class', 'card'), 'text') AS TEXT)"
 
   - name: xml dynamic attribute
     input: "<span style={style_expr}>text</span>"
-    expected: "xml_element('span', xml_attrs('style', style_expr), 'text')"
+    expected: "CAST(xml_element('span', xml_attrs('style', style_expr), 'text') AS TEXT)"
 
   - name: xml boolean attribute
     input: "<input disabled/>"
-    expected: "xml_element('input', xml_attrs('disabled', 'disabled'))"
+    expected: "CAST(xml_element('input', xml_attrs('disabled', 'disabled')) AS TEXT)"
 
   - name: xml multiple attributes
     input: '<td class="cell" id={cell_id}>val</td>'
-    expected: "xml_element('td', xml_attrs('class', 'cell', 'id', cell_id), 'val')"
+    expected: "CAST(xml_element('td', xml_attrs('class', 'cell', 'id', cell_id), 'val') AS TEXT)"
 
   - name: xml interpolation
     input: "<td>{property_address}</td>"
-    expected: "xml_element('td', property_address)"
+    expected: "CAST(xml_element('td', property_address) AS TEXT)"
 
   - name: xml nested elements
     input: "<div><span>text</span></div>"
-    expected: "xml_element('div', xml_element('span', 'text'))"
+    expected: "CAST(xml_element('div', xml_element('span', 'text')) AS TEXT)"
 
   - name: xml mixed text and interpolation
     input: "<td>Price: {amount}</td>"
-    expected: "xml_element('td', 'Price: ', amount)"
+    expected: "CAST(xml_element('td', 'Price: ', amount) AS TEXT)"
 
   - name: xml nested subquery
     input: |-
       SELECT <ul>{SELECT <li>{name}</li> FROM items}</ul>
-    expected: "SELECT xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items))"
+    expected: "SELECT CAST(xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items)) AS TEXT)"
 
   - name: xml self-closing with dynamic attr
     input: "<img src={url}/>"
-    expected: "xml_element('img', xml_attrs('src', url))"
+    expected: "CAST(xml_element('img', xml_attrs('src', url)) AS TEXT)"
 
   - name: xml namespaced tag
     input: "<ui:Table.Cell>{value}</ui:Table.Cell>"
-    expected: "xml_element('ui:Table.Cell', value)"
+    expected: "CAST(xml_element('ui:Table.Cell', value) AS TEXT)"
 
   - name: xml inside json
     input: "SELECT { name, card: <div>{name}</div> } FROM items"
-    expected: "SELECT json_object('name', name, 'card', xml_element('div', name)) FROM items"
+    expected: "SELECT json_object('name', name, 'card', CAST(xml_element('div', name) AS TEXT)) FROM items"
 
   - name: xml json object inside interpolation
     input: "<td>{{name, qty}}</td>"
-    expected: "xml_element('td', json_object('name', name, 'qty', qty))"
+    expected: "CAST(xml_element('td', json_object('name', name, 'qty', qty)) AS TEXT)"
 
   - name: xml json path inside interpolation
     input: "<td>{(metadata).address}</td>"
-    expected: "xml_element('td', json_extract(metadata, '$.address'))"
+    expected: "CAST(xml_element('td', json_extract(metadata, '$.address')) AS TEXT)"
 
   - name: xml literal brace
     input: "<td>{'{'}text{'}'}</td>"
-    expected: "xml_element('td', '{', 'text', '}')"
+    expected: "CAST(xml_element('td', '{', 'text', '}') AS TEXT)"
 
   - name: xml in select
     input: "SELECT <table><tr><th>Name</th></tr>{SELECT <tr><td>{name}</td></tr> FROM t}</table>"
-    expected: "SELECT xml_element('table', xml_element('tr', xml_element('th', 'Name')), (SELECT xml_agg(xml_element('tr', xml_element('td', name))) FROM t))"
+    expected: "SELECT CAST(xml_element('table', xml_element('tr', xml_element('th', 'Name')), (SELECT xml_agg(xml_element('tr', xml_element('td', name))) FROM t)) AS TEXT)"
 
   - name: xml sql passthrough
     input: "SELECT * FROM t WHERE x < 5"
@@ -719,11 +719,11 @@ convention:
 
   - name: xml with where clause in subquery
     input: "<ul>{SELECT <li>{name}</li> FROM items WHERE active}</ul>"
-    expected: "xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items WHERE active))"
+    expected: "CAST(xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items WHERE active)) AS TEXT)"
 
   - name: xml singular subquery
     input: "<div>{SELECT/1 <span>{name}</span> FROM t}</div>"
-    expected: "xml_element('div', (SELECT xml_element('span', name) FROM t LIMIT 1))"
+    expected: "CAST(xml_element('div', (SELECT xml_element('span', name) FROM t LIMIT 1)) AS TEXT)"
 
 # ── FK-guided join resolution ────────────────────────────────────────
 

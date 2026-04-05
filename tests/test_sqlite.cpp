@@ -109,7 +109,7 @@ struct DbGuardXml {
     DbGuardXml& operator=(const DbGuardXml&) = delete;
 };
 
-// Query that strips the sentinel prefix from the result.
+// Transpile and query, expecting exactly one XML result row.
 std::string xml_query(sqlite3* db, const std::string& deep_sql) {
     char* err_msg = nullptr;
     int err_line = 0, err_col = 0;
@@ -123,11 +123,6 @@ std::string xml_query(sqlite3* db, const std::string& deep_sql) {
     std::string sql(result);
     sqldeep_free(result);
     auto rows = query(db, sql);
-    // Strip sentinel from results
-    for (auto& row : rows) {
-        if (!row.empty() && row[0] == '\x01')
-            row = row.substr(1);
-    }
     if (rows.size() != 1)
         throw std::runtime_error("expected 1 row, got " +
                                   std::to_string(rows.size()));
@@ -1058,13 +1053,7 @@ TEST_CASE("sqlite: xml inside json") {
     auto rows = transpile_and_query(g.db,
         "SELECT { name, badge: <b>{name}</b> } FROM t");
     REQUIRE(rows.size() == 1);
-    // The sentinel prefix leaks into the JSON value — this is expected
-    // with the sentinel approach. A production implementation would strip
-    // it at the presentation boundary or use SQLite subtypes instead.
-    auto result = rows[0];
-    // Just verify the JSON structure is present and contains the XML
-    CHECK(result.find("\"name\":\"alice\"") != std::string::npos);
-    CHECK(result.find("<b>alice</b>") != std::string::npos);
+    CHECK(rows[0] == R"({"name":"alice","badge":"<b>alice</b>"})");
 }
 
 TEST_CASE("sqlite: xml mixed text and interpolation") {
