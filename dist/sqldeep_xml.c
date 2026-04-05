@@ -454,10 +454,17 @@ static void sd_jsonml_agg_final(sqlite3_context *ctx) {
 }
 
 // ── xml_attrs_jsx(name1, value1, name2, value2, ...) ──────────────
-// Like xml_attrs_jsonml, but values with SQLite JSON subtype (74) are
-// emitted as raw JSON instead of quoted strings.  This lets json('true'),
-// json_object(...), json_array(...) flow through as live values in the
-// JSONML attributes object.
+// Like xml_attrs_jsonml, but values that are JSON (subtype 74),
+// INTEGER, or FLOAT are emitted as raw JSON values instead of quoted
+// strings.  This lets json_object(...), numbers, and booleans flow
+// through as live values in the JSONML attributes object.
+
+/* Return true if the value should be emitted as raw JSON (unquoted). */
+static int jsx_is_raw(sqlite3_value *v) {
+    if (sqlite3_value_subtype(v) == 74) return 1;         /* JSON */
+    int t = sqlite3_value_type(v);
+    return t == SQLITE_INTEGER || t == SQLITE_FLOAT;
+}
 
 static void sd_xml_attrs_jsx(sqlite3_context *ctx, int argc,
                               sqlite3_value **argv) {
@@ -478,8 +485,8 @@ static void sd_xml_attrs_jsx(sqlite3_context *ctx, int argc,
         vallen = (int)strlen(val);
         len += 2 + json_escaped_len(name, namelen); /* "name" */
         len += 1; /* : */
-        if (sqlite3_value_subtype(argv[i + 1]) == 74) {
-            len += vallen; /* raw JSON */
+        if (jsx_is_raw(argv[i + 1])) {
+            len += vallen; /* raw JSON/number */
         } else {
             len += 2 + json_escaped_len(val, vallen); /* "val" */
         }
@@ -503,12 +510,12 @@ static void sd_xml_attrs_jsx(sqlite3_context *ctx, int argc,
         json_escape_to(name, namelen, out, &pos);
         out[pos++] = '"';
         out[pos++] = ':';
-        if (sqlite3_value_subtype(argv[i + 1]) == 74) {
-            /* JSON-typed value — emit raw */
+        if (jsx_is_raw(argv[i + 1])) {
+            /* JSON/numeric value — emit raw */
             memcpy(out + pos, val, vallen);
             pos += vallen;
         } else {
-            /* Plain value — emit as JSON string */
+            /* Plain text value — emit as JSON string */
             out[pos++] = '"';
             json_escape_to(val, vallen, out, &pos);
             out[pos++] = '"';
