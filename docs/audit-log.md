@@ -69,3 +69,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `4692c1a`
 - **Outcome**: Released v0.12.0. Added `xml_to_jsonml()` transpiler macro for JSONML output — emits `xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg` runtime functions that build JSON arrays directly. Updated README, agents guide, CLAUDE.md, STABILITY.md. 382 assertions pass (67 test cases).
+
+## 2026-04-05 — /release v0.13.0
+
+- **Commit**: `f2db49b`
+- **Outcome**: Released v0.13.0. Added self-closing void element distinction (`xml_element('br/')` convention) and multi-line XML dedent (common whitespace prefix stripping). Updated README, agents guide, CLAUDE.md, STABILITY.md. 387 assertions pass (69 test cases).
