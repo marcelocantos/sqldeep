@@ -74,3 +74,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `f2db49b`
 - **Outcome**: Released v0.13.0. Added self-closing void element distinction (`xml_element('br/')` convention) and multi-line XML dedent (common whitespace prefix stripping). Updated README, agents guide, CLAUDE.md, STABILITY.md. 387 assertions pass (69 test cases).
+
+## 2026-04-05 — /release v0.14.0
+
+- **Commit**: `d8fd878`
+- **Outcome**: Released v0.14.0 (darwin-arm64, linux-amd64, linux-arm64). Added `jsx()` and `jsonml()` output modes (replacing `xml_to_jsonml()`), JSON boolean auto-wrapping (`true`/`false` → `json('true')`/`json('false')`), boolean attribute semantics via subtype 74, object/array literals at any paren depth, `--help-agent` CLI flag. Added release CI workflow with Homebrew tap integration. 422 assertions pass (79 test cases).
