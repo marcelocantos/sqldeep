@@ -134,7 +134,9 @@ is standard and works unchanged across backends.
 - XML singular subquery: `{SELECT/1 <span>{name}</span> FROM t}`
   → `(SELECT xml_element('span', name) FROM t LIMIT 1)`
 - XML namespaced tags: `<ui:Table.Cell>` → `xml_element('ui:Table.Cell', ...)`
-- XML boolean attribute: `<input disabled/>` → `xml_element('input', xml_attrs('disabled', 1))`
+- XML boolean attribute: `<input disabled/>` → `xml_element('input', xml_attrs('disabled', json('true')))`
+  Uses `json('true')`/`json('false')` (subtype 74) to distinguish booleans from plain integers.
+  `json('true')` → bare attribute name; `json('false')` → omit; plain integer `1` → `name="1"`.
 - XML inside JSON: `{ card: <div>{name}</div> }` → `json_object('card', xml_element('div', name))`
 - JSON object inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object('name', name, 'qty', qty))`
 - JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`

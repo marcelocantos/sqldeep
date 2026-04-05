@@ -681,7 +681,7 @@ convention:
 
   - name: xml boolean attribute
     input: "<input disabled/>"
-    expected: "CAST(xml_element('input/', xml_attrs('disabled', 1)) AS TEXT)"
+    expected: "CAST(xml_element('input/', xml_attrs('disabled', json('true'))) AS TEXT)"
 
   - name: xml multiple attributes
     input: '<td class="cell" id={cell_id}>val</td>'

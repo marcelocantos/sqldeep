@@ -1049,25 +1049,24 @@ TEST_CASE("sqlite: xml boolean attribute") {
 
 TEST_CASE("sqlite: xml dynamic boolean attribute") {
     DbGuardXml g;
-    exec(g.db, R"(
-        CREATE TABLE flags(id INTEGER PRIMARY KEY, is_checked INTEGER);
-        INSERT INTO flags VALUES(1, 1);
-        INSERT INTO flags VALUES(2, 0);
-    )");
 
-    // integer 1 → bare attribute
+    // json('true') → bare attribute name
     auto rows1 = query(g.db,
-        "SELECT CAST(xml_element('input/', xml_attrs('checked', is_checked)) AS TEXT) "
-        "FROM flags WHERE id = 1");
+        "SELECT CAST(xml_element('input/', xml_attrs('checked', json('true'))) AS TEXT)");
     REQUIRE(rows1.size() == 1);
     CHECK(rows1[0] == R"(<input checked/>)");
 
-    // integer 0 → attribute omitted
+    // json('false') → attribute omitted
     auto rows2 = query(g.db,
-        "SELECT CAST(xml_element('input/', xml_attrs('checked', is_checked)) AS TEXT) "
-        "FROM flags WHERE id = 2");
+        "SELECT CAST(xml_element('input/', xml_attrs('checked', json('false'))) AS TEXT)");
     REQUIRE(rows2.size() == 1);
     CHECK(rows2[0] == R"(<input/>)");
+
+    // plain integer 1 → normal attribute value, not boolean
+    auto rows3 = query(g.db,
+        "SELECT CAST(xml_element('td', xml_attrs('colspan', 1)) AS TEXT)");
+    REQUIRE(rows3.size() == 1);
+    CHECK(rows3[0] == R"(<td colspan="1"></td>)");
 }
 
 TEST_CASE("sqlite: xml subquery") {

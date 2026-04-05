@@ -1466,9 +1466,9 @@ private:
 
             Token eq = lex_.peek();
             if (eq.type != TokenType::Other || eq.text != "=") {
-                // Boolean attribute: emit 1 so xml_attrs renders bare name
+                // Boolean attribute: emit json('true') so xml_attrs renders bare name
                 SqlParts val;
-                val.push_back(std::string("1"));
+                val.push_back(std::string("json('true')"));
                 el->attrs.push_back({attr_name, std::move(val), false});
                 continue;
             }
