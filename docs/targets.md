@@ -37,6 +37,23 @@
 - **Status**: achieved (v0.9.0)
 - **Discovered**: 2026-04-05
 
+### 🎯T4 xml_to_jsonml() transpiler macro converts XML literals to JSONML output
+- **Weight**: TBD
+- **Acceptance**:
+  - `xml_to_jsonml(<div class="card">hello</div>)` transpiles to `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), 'hello') AS TEXT)`
+  - Runtime output: `["div",{"class":"card"},"hello"]`
+  - Nested elements produce nested JSONML arrays
+  - Attributes become a JSON object as the second element (omitted if no attributes)
+  - Text children become JSON strings
+  - Empty elements: `<br/>` → `["br"]`
+  - Subquery aggregation uses `jsonml_agg` instead of `xml_agg`
+  - BLOB protocol: `_jsonml` functions return BLOBs (`[` = element, `{` = attrs)
+  - Registered alongside existing XML functions via `sqldeep_register_sqlite_xml()`
+  - Transpilation tests and SQLite integration tests
+- **Context**: XML literals are the authoring syntax; JSONML is an easier format for programmatic consumption. Transpiler-level macro avoids wasteful XML→parse→JSONML round-trip — the structure is preserved from the AST through to the runtime functions.
+- **Status**: in progress
+- **Discovered**: 2026-04-05
+
 ## Achieved
 
 ### 🎯T2 Recursive tree construction from self-referential tables

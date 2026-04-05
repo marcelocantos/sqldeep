@@ -132,6 +132,8 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - JSON inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object(...))`
 - JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
 - Literal brace in XML: `{'{'}` → `'{'`
+- JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`
+- JSONML subquery: `xml_to_jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
 - `--` line comments and `/* ... */` block comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }`, `[ ]`, or `<tag>` constructs passes through unchanged.

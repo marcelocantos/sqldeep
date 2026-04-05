@@ -1072,3 +1072,79 @@ TEST_CASE("sqlite: xml empty subquery") {
         "SELECT <ul>{SELECT <li>{name}</li> FROM items}</ul>");
     CHECK(result == "<ul></ul>");
 }
+
+// ── JSONML integration tests ───────────────────────────────────────
+
+TEST_CASE("sqlite: jsonml static element") {
+    DbGuardXml g;
+    auto result = xml_query(g.db, "SELECT xml_to_jsonml(<div>hello</div>)");
+    CHECK(result == R"(["div","hello"])");
+}
+
+TEST_CASE("sqlite: jsonml self-closing") {
+    DbGuardXml g;
+    auto result = xml_query(g.db, "SELECT xml_to_jsonml(<br/>)");
+    CHECK(result == R"(["br"])");
+}
+
+TEST_CASE("sqlite: jsonml with attributes") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, cls TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'highlight')");
+    auto result = xml_query(g.db,
+        "SELECT xml_to_jsonml(<span class={cls}>text</span>) FROM t");
+    CHECK(result == R"(["span",{"class":"highlight"},"text"])");
+}
+
+TEST_CASE("sqlite: jsonml interpolation") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'alice')");
+    auto result = xml_query(g.db,
+        "SELECT xml_to_jsonml(<td>{name}</td>) FROM t");
+    CHECK(result == R"(["td","alice"])");
+}
+
+TEST_CASE("sqlite: jsonml escaping") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT)");
+    exec(g.db, R"(INSERT INTO t VALUES(1, 'he said "hi"'))");
+    auto result = xml_query(g.db,
+        "SELECT xml_to_jsonml(<td>{val}</td>) FROM t");
+    CHECK(result == R"(["td","he said \"hi\""])");
+}
+
+TEST_CASE("sqlite: jsonml nested elements") {
+    DbGuardXml g;
+    auto result = xml_query(g.db,
+        "SELECT xml_to_jsonml(<div><span>inner</span></div>)");
+    CHECK(result == R"(["div",["span","inner"]])");
+}
+
+TEST_CASE("sqlite: jsonml subquery") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO items VALUES(1, 'apple')");
+    exec(g.db, "INSERT INTO items VALUES(2, 'banana')");
+    auto result = xml_query(g.db,
+        "SELECT xml_to_jsonml(<ul>{SELECT <li>{name}</li> FROM items ORDER BY id}</ul>)");
+    CHECK(result == R"(["ul",["li","apple"],["li","banana"]])");
+}
+
+TEST_CASE("sqlite: jsonml empty subquery") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)");
+    auto result = xml_query(g.db,
+        "SELECT xml_to_jsonml(<ul>{SELECT <li>{name}</li> FROM items}</ul>)");
+    CHECK(result == R"(["ul"])");
+}
+
+TEST_CASE("sqlite: jsonml inside json") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'alice')");
+    auto rows = transpile_and_query(g.db,
+        "SELECT { name, badge: xml_to_jsonml(<b>{name}</b>) } FROM t");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"name":"alice","badge":"[\"b\",\"alice\"]"})");
+}

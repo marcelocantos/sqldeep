@@ -136,6 +136,8 @@ is standard and works unchanged across backends.
 - JSON object inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object('name', name, 'qty', qty))`
 - JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
 - Literal brace in XML: `{'{'}` → `'{'`
+- JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`. Transpiler macro — emits `_jsonml` variant functions.
+- JSONML subquery: `xml_to_jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
 - `--` line comments stripped
 - `/* ... */` block comments stripped (flat, not nested)
 - Trailing commas allowed

@@ -64,3 +64,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `1c02a67`
 - **Outcome**: Released v0.11.0. Replaced XML sentinel byte (`\x01`) with BLOB type protocol — XML functions return BLOBs, transpiler emits `CAST(... AS TEXT)` at boundaries. Fixes sentinel leak into JSON values. 362 assertions pass (58 test cases).
+
+## 2026-04-05 — /release v0.12.0
+
+- **Commit**: `68f7a46`
+- **Outcome**: Released v0.12.0. Added `xml_to_jsonml()` transpiler macro for JSONML output — emits `xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg` runtime functions that build JSON arrays directly. Updated README, agents guide, CLAUDE.md, STABILITY.md. 382 assertions pass (67 test cases).
