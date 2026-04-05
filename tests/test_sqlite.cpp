@@ -1034,6 +1034,13 @@ TEST_CASE("sqlite: xml empty non-void element") {
     CHECK(result == "<div></div>");
 }
 
+TEST_CASE("sqlite: xml dedent multi-line") {
+    DbGuardXml g;
+    auto result = xml_query(g.db,
+        "SELECT <div>\n      <span>text</span>\n    </div>");
+    CHECK(result == "<div>\n  <span>text</span>\n</div>");
+}
+
 TEST_CASE("sqlite: xml boolean attribute") {
     DbGuardXml g;
     auto result = xml_query(g.db, "SELECT <input disabled/>");

@@ -367,6 +367,74 @@ struct XmlElement {
     bool jsonml = false;  // true = emit _jsonml variant functions
 };
 
+// ── XML dedent ─────────────────────────────────────────────────────
+//
+// Multi-line XML literals carry source indentation in their text
+// children.  xml_dedent strips the common leading-space prefix from
+// all lines that follow a newline, so the output reflects relative
+// indentation only.
+
+static int xml_min_indent(const XmlElement& el) {
+    int min_indent = INT_MAX;
+    for (const auto& child : el.children) {
+        if (child.kind == XmlElement::Child::Text) {
+            const std::string& t = child.text;
+            size_t i = 0;
+            while (i < t.size()) {
+                size_t nl = t.find('\n', i);
+                if (nl == std::string::npos) break;
+                size_t ls = nl + 1;
+                int sp = 0;
+                while (ls + sp < t.size() && t[ls + sp] == ' ') ++sp;
+                // Skip only lines that are blank between two newlines.
+                // Lines that end at the text boundary still carry
+                // meaningful indentation (before a child element or
+                // closing tag).
+                if (ls + sp < t.size() && t[ls + sp] == '\n') {
+                    i = ls;
+                    continue;  // blank interior line
+                }
+                min_indent = std::min(min_indent, sp);
+                i = ls;
+            }
+        } else if (child.kind == XmlElement::Child::Element) {
+            min_indent = std::min(min_indent, xml_min_indent(*child.element));
+        }
+    }
+    return min_indent;
+}
+
+static void xml_strip_indent(XmlElement& el, int n) {
+    for (auto& child : el.children) {
+        if (child.kind == XmlElement::Child::Text) {
+            std::string out;
+            size_t i = 0;
+            while (i < child.text.size()) {
+                size_t nl = child.text.find('\n', i);
+                if (nl == std::string::npos) {
+                    out.append(child.text, i, std::string::npos);
+                    break;
+                }
+                out.append(child.text, i, nl - i + 1); // include \n
+                size_t ls = nl + 1;
+                int stripped = 0;
+                while (stripped < n && ls + stripped < child.text.size() &&
+                       child.text[ls + stripped] == ' ')
+                    ++stripped;
+                i = ls + stripped;
+            }
+            child.text = std::move(out);
+        } else if (child.kind == XmlElement::Child::Element) {
+            xml_strip_indent(*child.element, n);
+        }
+    }
+}
+
+static void xml_dedent(XmlElement& el) {
+    int n = xml_min_indent(el);
+    if (n > 0 && n < INT_MAX) xml_strip_indent(el, n);
+}
+
 // ── Parser ──────────────────────────────────────────────────────────
 
 static bool is_keyword(const Token& t, const char* kw) {
@@ -911,6 +979,7 @@ private:
                             flush_before(t);
                             auto el = parse_xml_element(depth + 1,
                                                         /*jsonml=*/true);
+                            xml_dedent(*el);
                             Token close = lex_.peek();
                             if (close.type != TokenType::RParen)
                                 lex_.error("expected ')' after xml_to_jsonml",
@@ -937,6 +1006,7 @@ private:
                     lex_.restore(st);
                     flush_before(t);
                     auto el = parse_xml_element(depth + 1);
+                    xml_dedent(*el);
                     parts.push_back(std::move(el));
                     last_end = lex_.offset();
                     need_space = true;

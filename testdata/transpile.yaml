@@ -729,6 +729,14 @@ convention:
     input: "<div>{SELECT/1 <span>{name}</span> FROM t}</div>"
     expected: "CAST(xml_element('div', (SELECT xml_element('span', name) FROM t LIMIT 1)) AS TEXT)"
 
+  - name: xml dedent multi-line
+    input: "SELECT <div>\n      <span>text</span>\n    </div>"
+    expected: "SELECT CAST(xml_element('div', '\n  ', xml_element('span', 'text'), '\n') AS TEXT)"
+
+  - name: xml dedent no newlines unchanged
+    input: "<div><span>text</span></div>"
+    expected: "CAST(xml_element('div', xml_element('span', 'text')) AS TEXT)"
+
 # ── JSONML (xml_to_jsonml) ──────────────────────────────────────────
 
   - name: jsonml static element
