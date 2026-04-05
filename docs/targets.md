@@ -51,7 +51,7 @@
   - Registered alongside existing XML functions via `sqldeep_register_sqlite_xml()`
   - Transpilation tests and SQLite integration tests
 - **Context**: XML literals are the authoring syntax; JSONML is an easier format for programmatic consumption. Transpiler-level macro avoids wasteful XML→parse→JSONML round-trip — the structure is preserved from the AST through to the runtime functions.
-- **Status**: in progress
+- **Status**: achieved (v0.12.0)
 - **Discovered**: 2026-04-05
 
 ## Achieved
