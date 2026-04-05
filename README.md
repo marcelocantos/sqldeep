@@ -198,11 +198,11 @@ SELECT <table class="products">
     <td>{'$' || price}</td>
   </tr> FROM items ORDER BY name}
 </table>
--- → SELECT xml_element('table', xml_attrs('class', 'products'),
+-- → SELECT CAST(xml_element('table', xml_attrs('class', 'products'),
 --     xml_element('tr', xml_element('th', 'Item'), xml_element('th', 'Price')),
 --     (SELECT xml_agg(xml_element('tr',
 --       xml_element('td', name), xml_element('td', '$' || price)))
---      FROM items ORDER BY name))
+--      FROM items ORDER BY name)) AS TEXT)
 ```
 
 - `<tag attr="static" dynamic={expr}>...</tag>` → `xml_element('tag', xml_attrs(...), ...)`

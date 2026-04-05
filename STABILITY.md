@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.10.0.
+Snapshot as of v0.11.0.
 
 ### C API (`sqldeep.h`)
 
@@ -53,9 +53,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.10.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.11.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `10` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `11` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
@@ -128,7 +128,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | FK-guided join | Uses explicit FK metadata (no convention fallback) | **Stable** |
 | Multi-column FK | AND-joined conditions | **Stable** |
 | Recursive select | `WITH RECURSIVE` 3-CTE bracket-injection template | **Experimental** |
-| XML element | `xml_element('tag', xml_attrs(...), ...)` | **Experimental** |
+| XML element (top-level) | `CAST(xml_element('tag', xml_attrs(...), ...) AS TEXT)` | **Experimental** |
+| XML element (nested) | `xml_element(...)` (no CAST — BLOB consumed by parent) | **Experimental** |
+| XML inside JSON | `CAST(xml_element(...) AS TEXT)` at JSON boundary | **Experimental** |
 | XML subquery aggregation | `xml_agg(xml_element(...))` | **Experimental** |
 
 ### Parser behaviour
@@ -193,8 +195,10 @@ Before 1.0:
   interpolation, `{SELECT ...}` subqueries with `xml_agg`, namespaced tags,
   boolean attributes. Reference SQLite implementations of the runtime functions
   (`xml_element`, `xml_attrs`, `xml_agg`) are provided in `sqldeep_xml.h`/`.c`
-  (v0.10.0). Whitespace handling in XML body text is literal (not stripped
-  like JSX).
+  (v0.10.0). v0.11.0 switched from sentinel byte to BLOB type protocol —
+  XML functions return BLOBs internally, transpiler emits `CAST(... AS TEXT)`
+  at top-level and JSON boundaries. Whitespace handling in XML body text is
+  literal (not stripped like JSX).
 
 ## Known limitations
 

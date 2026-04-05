@@ -24,7 +24,7 @@
 - **Acceptance**:
   - `<tag attr={expr}>...</tag>` transpiles to `xml_element('tag', xml_attrs('attr', expr), ...)` calls
   - `{expr}` interpolation inside XML content and attributes
-  - `{SELECT ...}` nested subqueries inside XML with aggregation (`xml_agg` or sentinel)
+  - `{SELECT ...}` nested subqueries inside XML with aggregation (`xml_agg`)
   - Self-closing elements, namespaced tags, boolean attributes
   - XML literals valid inside JSON object fields (`{ name, card: <div>...</div> }`)
   - JSON path navigation `(expr).path[n]` works inside XML interpolation

@@ -128,7 +128,7 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - XML singular subquery: `{SELECT/1 <span>{name}</span> FROM t}` → `(SELECT xml_element(...) FROM t LIMIT 1)`
 - XML namespaced tags: `<ui:Table.Cell>` → `xml_element('ui:Table.Cell', ...)`
 - XML boolean attribute: `<input disabled/>` → `xml_attrs('disabled', 'disabled')`
-- XML inside JSON: `{ card: <div>{name}</div> }` → `json_object('card', xml_element(...))`
+- XML inside JSON: `{ card: <div>{name}</div> }` → `json_object('card', CAST(xml_element(...) AS TEXT))`
 - JSON inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object(...))`
 - JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
 - Literal brace in XML: `{'{'}` → `'{'`
