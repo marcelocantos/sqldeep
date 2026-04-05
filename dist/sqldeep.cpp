@@ -794,6 +794,10 @@ private:
             if (!accum.empty()) {
                 parts.push_back(std::move(accum));
                 accum.clear();
+                // Invalidate paren-start positions that referred into the
+                // flushed accum — they're no longer meaningful.
+                for (auto& ps : accum_paren_starts)
+                    ps = SIZE_MAX;
             }
             has_raw = false;
         };
@@ -1123,7 +1127,8 @@ private:
                 if (!accum_paren_starts.empty()) {
                     size_t start = accum_paren_starts.back();
                     accum_paren_starts.pop_back();
-                    if (try_transform_json_path(accum, start))
+                    if (start != SIZE_MAX &&
+                        try_transform_json_path(accum, start))
                         last_end = lex_.offset();
                 }
             } else {
