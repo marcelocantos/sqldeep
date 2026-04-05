@@ -1358,9 +1358,9 @@ private:
 
             Token eq = lex_.peek();
             if (eq.type != TokenType::Other || eq.text != "=") {
-                // Boolean attribute (no value)
+                // Boolean attribute: emit name as value (disabled="disabled")
                 SqlParts val;
-                val.push_back(std::string("1"));
+                val.push_back(std::string("'") + attr_name + "'");
                 el->attrs.push_back({attr_name, std::move(val), false});
                 continue;
             }

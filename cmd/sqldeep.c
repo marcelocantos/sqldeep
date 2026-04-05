@@ -54,12 +54,8 @@ static void sd_xml_attrs(sqlite3_context *ctx, int argc,
         if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
         len += 1; /* space */
         len += (int)strlen((const char *)sqlite3_value_text(argv[i]));
-        if (sqlite3_value_type(argv[i + 1]) == SQLITE_INTEGER) {
-            /* boolean: just the name, or omitted */
-        } else {
-            val = (const char *)sqlite3_value_text(argv[i + 1]);
-            len += 2 + xml_escaped_len(val); /* ="..." */
-        }
+        val = (const char *)sqlite3_value_text(argv[i + 1]);
+        len += 2 + xml_escaped_len(val); /* ="..." */
     }
     char *out = (char *)sqlite3_malloc(len + 1);
     if (!out) { sqlite3_result_error_nomem(ctx); return; }
@@ -69,32 +65,22 @@ static void sd_xml_attrs(sqlite3_context *ctx, int argc,
         const char *name, *val;
         if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
         name = (const char *)sqlite3_value_text(argv[i]);
-        if (sqlite3_value_type(argv[i + 1]) == SQLITE_INTEGER) {
-            int v = sqlite3_value_int(argv[i + 1]);
-            if (v == 1) {
-                out[pos++] = ' ';
-                memcpy(out + pos, name, strlen(name));
-                pos += (int)strlen(name);
+        val = (const char *)sqlite3_value_text(argv[i + 1]);
+        out[pos++] = ' ';
+        memcpy(out + pos, name, strlen(name));
+        pos += (int)strlen(name);
+        out[pos++] = '=';
+        out[pos++] = '"';
+        for (const char *p = val; *p; ++p) {
+            switch (*p) {
+            case '"': memcpy(out + pos, "&quot;", 6); pos += 6; break;
+            case '<': memcpy(out + pos, "&lt;", 4); pos += 4; break;
+            case '>': memcpy(out + pos, "&gt;", 4); pos += 4; break;
+            case '&': memcpy(out + pos, "&amp;", 5); pos += 5; break;
+            default:  out[pos++] = *p; break;
             }
-        } else {
-            val = (const char *)sqlite3_value_text(argv[i + 1]);
-            out[pos++] = ' ';
-            memcpy(out + pos, name, strlen(name));
-            pos += (int)strlen(name);
-            out[pos++] = '=';
-            out[pos++] = '"';
-            /* escape attr value: " → &quot; plus the usual */
-            for (const char *p = val; *p; ++p) {
-                switch (*p) {
-                case '"': memcpy(out + pos, "&quot;", 6); pos += 6; break;
-                case '<': memcpy(out + pos, "&lt;", 4); pos += 4; break;
-                case '>': memcpy(out + pos, "&gt;", 4); pos += 4; break;
-                case '&': memcpy(out + pos, "&amp;", 5); pos += 5; break;
-                default:  out[pos++] = *p; break;
-                }
-            }
-            out[pos++] = '"';
         }
+        out[pos++] = '"';
     }
     out[pos] = '\0';
     sqlite3_result_text(ctx, out, pos, sqlite3_free);

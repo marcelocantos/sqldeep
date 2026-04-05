@@ -149,23 +149,13 @@ static void sqlite_xml_attrs(sqlite3_context* ctx, int argc,
         if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
         const char* name = reinterpret_cast<const char*>(
             sqlite3_value_text(argv[i]));
-        int vtype = sqlite3_value_type(argv[i + 1]);
-        if (vtype == SQLITE_INTEGER) {
-            int v = sqlite3_value_int(argv[i + 1]);
-            if (v == 1) {
-                out += " ";
-                out += name;
-            }
-            // v == 0: omit
-        } else {
-            const char* val = reinterpret_cast<const char*>(
-                sqlite3_value_text(argv[i + 1]));
-            out += " ";
-            out += name;
-            out += "=\"";
-            out += xml_escape_attr(val);
-            out += "\"";
-        }
+        const char* val = reinterpret_cast<const char*>(
+            sqlite3_value_text(argv[i + 1]));
+        out += " ";
+        out += name;
+        out += "=\"";
+        out += xml_escape_attr(val);
+        out += "\"";
     }
     std::string result = std::string(1, kXmlSentinel) + out;
     sqlite3_result_text(ctx, result.c_str(), -1, SQLITE_TRANSIENT);
@@ -1209,7 +1199,7 @@ TEST_CASE("sqlite: xml self-closing") {
 TEST_CASE("sqlite: xml boolean attribute") {
     DbGuardXml g;
     auto result = xml_query(g.db, "SELECT <input disabled/>");
-    CHECK(result == "<input disabled/>");
+    CHECK(result == R"(<input disabled="disabled"/>)");
 }
 
 TEST_CASE("sqlite: xml subquery") {

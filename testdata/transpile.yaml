@@ -662,7 +662,7 @@ convention:
 
   - name: xml boolean attribute
     input: "<input disabled/>"
-    expected: "xml_element('input', xml_attrs('disabled', 1))"
+    expected: "xml_element('input', xml_attrs('disabled', 'disabled'))"
 
   - name: xml multiple attributes
     input: '<td class="cell" id={cell_id}>val</td>'
