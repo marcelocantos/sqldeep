@@ -28,6 +28,7 @@ notice, here is a blessing:
 SQLite is in the public domain. See vendor/src/sqlite3.LICENSE.
 
 Used for: integration testing (test-only dependency, not part of the library).
+The SQLite shell (shell.c) is included for the sqldeep interactive CLI.
 
 ================================================================================
 

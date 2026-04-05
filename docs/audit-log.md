@@ -49,3 +49,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `44b26a9`
 - **Outcome**: Released v0.8.0. Added recursive tree construction (`RECURSE ON`) with bracket-injection CTE. Fixed Go bindings broken `#include`. Updated README with recursive select docs and comment syntax. All 325 assertions pass (47 test cases).
+
+## 2026-04-05 — /release v0.9.0
+
+- **Commit**: TBD
+- **Outcome**: Released v0.9.0. Added XML/HTML literal syntax (`<tag attr={expr}>...</tag>` → `xml_element(...)` calls). Added interactive CLI (`sqldeep`) wrapping SQLite shell with transpilation and XML functions. Updated README, agent guide, NOTICES, STABILITY.md. 363 assertions pass (58 test cases).

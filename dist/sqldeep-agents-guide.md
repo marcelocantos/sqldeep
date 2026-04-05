@@ -55,9 +55,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "0.8.0"
+SQLDEEP_VERSION       // "0.9.0"
 SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 8
+SQLDEEP_VERSION_MINOR // 9
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```
@@ -108,9 +108,20 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
   produces nested JSON trees from self-referential tables. `*` marks the recursion point.
   `RECURSE ON (fk = pk)` for explicit PK (default: `id`). `SELECT` (no `/1`) produces a forest `[]`.
   Output is a bracket-injection CTE — no client-side assembly.
+- XML element: `<div class="card">{name}</div>` → `xml_element('div', xml_attrs('class', 'card'), name)`
+- XML self-closing: `<br/>` → `xml_element('br')`
+- XML interpolation: `{expr}` inside XML content or attributes
+- XML subquery: `{SELECT <li>{name}</li> FROM t}` → `(SELECT xml_agg(xml_element('li', name)) FROM t)`
+- XML singular subquery: `{SELECT/1 <span>{name}</span> FROM t}` → `(SELECT xml_element(...) FROM t LIMIT 1)`
+- XML namespaced tags: `<ui:Table.Cell>` → `xml_element('ui:Table.Cell', ...)`
+- XML boolean attribute: `<input disabled/>` → `xml_attrs('disabled', 'disabled')`
+- XML inside JSON: `{ card: <div>{name}</div> }` → `json_object('card', xml_element(...))`
+- JSON inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object(...))`
+- JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
+- Literal brace in XML: `{'{'}` → `'{'`
 - `--` line comments and `/* ... */` block comments are stripped.
 - Trailing commas are allowed in objects and arrays.
-- SQL without `{ }` or `[ ]` passes through unchanged.
+- SQL without `{ }`, `[ ]`, or `<tag>` constructs passes through unchanged.
 
 ## Gotchas
 

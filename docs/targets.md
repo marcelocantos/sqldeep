@@ -34,7 +34,7 @@
   - Transpilation tests and SQLite integration tests
   - XML functions registered in sqlpipe (out of scope for sqldeep itself — sqldeep is string→string)
 - **Context**: Design paper at `docs/papers/xml-literals.md`. Motivated by sqlpipe reactive UI — single SQL expression produces query + component tree. Inspired by arr.ai AuctionFox demo.
-- **Status**: planned
+- **Status**: achieved (v0.9.0)
 - **Discovered**: 2026-04-05
 
 ## Achieved
