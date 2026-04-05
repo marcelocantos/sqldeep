@@ -795,6 +795,10 @@ convention:
     input: "<div>{SELECT/1 <span>{name}</span> FROM t}</div>"
     expected: "CAST(xml_element('div', (SELECT xml_element('span', name) FROM t LIMIT 1)) AS TEXT)"
 
+  - name: singular select with xml literal
+    input: "SELECT/1 <div>{name}</div> FROM t"
+    expected: "SELECT CAST(xml_element('div', name) AS TEXT) FROM t LIMIT 1"
+
   - name: xml dedent multi-line
     input: "SELECT <div>\n      <span>text</span>\n    </div>"
     expected: "SELECT CAST(xml_element('div', '\n  ', xml_element('span', 'text'), '\n') AS TEXT)"
@@ -868,6 +872,10 @@ convention:
     input: |-
       SELECT jsx(<ul>{SELECT <li>{name}</li> FROM items}</ul>)
     expected: "SELECT CAST(xml_element_jsx('ul', (SELECT jsx_agg(xml_element_jsx('li', name)) FROM items)) AS TEXT)"
+
+  - name: jsx singular select
+    input: "SELECT/1 jsx(<div>{name}</div>) FROM t"
+    expected: "SELECT CAST(xml_element_jsx('div', name) AS TEXT) FROM t LIMIT 1"
 
   - name: jsx json object attribute
     input: "jsx(<Graph data={{x, y}}/>)"

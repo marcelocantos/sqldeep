@@ -945,9 +945,24 @@ private:
                     need_space = true;
                     continue;
                 }
-                // SELECT/1 without {/[ — not a deep select. Let the
-                // XML literal or wrapper be picked up by normal handlers.
-                // Not deep — restore and accumulate SELECT as raw SQL
+                if (singular) {
+                    // SELECT/1 without {/[ — parse rest as plain SELECT
+                    // with LIMIT 1. Emit "SELECT" as raw SQL and let
+                    // the expression (XML, wrapper, etc.) be parsed by
+                    // subsequent handlers; append LIMIT 1 at the end.
+                    flush_before(t);
+                    auto rest = parse_sql_parts(stop_comma, stop_rbrace,
+                                                stop_rbracket, stop_rparen,
+                                                depth);
+                    parts.push_back(std::string("SELECT "));
+                    for (auto& p : rest)
+                        parts.push_back(std::move(p));
+                    parts.push_back(std::string(" LIMIT 1"));
+                    last_end = lex_.offset();
+                    need_space = true;
+                    continue;
+                }
+                // Not deep, not singular — restore and accumulate
                 lex_.restore(st);
             }
 
