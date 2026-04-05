@@ -141,8 +141,19 @@ is standard and works unchanged across backends.
 - JSON object inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object('name', name, 'qty', qty))`
 - JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
 - Literal brace in XML: `{'{'}` → `'{'`
-- JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`. Transpiler macro — emits `_jsonml` variant functions.
+- JSON booleans: standalone `true`/`false` in JSON object fields, array elements, and
+  XML attribute/interpolation contexts are auto-wrapped as `json('true')`/`json('false')`
+  to preserve proper JSON boolean semantics (not integer 1/0).
+- JSONML output: `xml_to_jsonml(<div class="card">{name}</div>)` or
+  `jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`. Transpiler macro — emits `_jsonml` variant functions.
 - JSONML subquery: `xml_to_jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
+- JSX output: `jsx(<Graph data={{x, y}} label="Sales"/>)` →
+  `CAST(xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object('x', x, 'y', y), 'label', 'Sales')) AS TEXT)`.
+  Like JSONML but preserves JSON-typed attribute values (subtype 74) as raw JSON
+  in the attributes object instead of stringifying. `xml_attrs_jsx` checks
+  `sqlite3_value_subtype == 74` to detect JSON values.
+  Boolean attributes (`<input disabled/>`) produce `{"disabled":true}` in JSX mode.
+- JSX subquery: `jsx(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsx_agg`
 - `--` line comments stripped
 - `/* ... */` block comments stripped (flat, not nested)
 - Trailing commas allowed

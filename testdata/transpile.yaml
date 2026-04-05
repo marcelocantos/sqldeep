@@ -824,6 +824,38 @@ convention:
     input: "SELECT * FROM t WHERE x < 5"
     expected: "SELECT * FROM t WHERE x < 5"
 
+  # jsonml() short form (alias for xml_to_jsonml)
+  - name: jsonml short form
+    input: "jsonml(<div>hello</div>)"
+    expected: "CAST(xml_element_jsonml('div', 'hello') AS TEXT)"
+
+# ── JSX mode ────────────────────────────────────────────────────────
+
+  - name: jsx static element
+    input: "jsx(<div>hello</div>)"
+    expected: "CAST(xml_element_jsx('div', 'hello') AS TEXT)"
+
+  - name: jsx with attributes
+    input: 'jsx(<div class="card">text</div>)'
+    expected: "CAST(xml_element_jsx('div', xml_attrs_jsx('class', 'card'), 'text') AS TEXT)"
+
+  - name: jsx dynamic attribute
+    input: "jsx(<span style={style_expr}>text</span>)"
+    expected: "CAST(xml_element_jsx('span', xml_attrs_jsx('style', style_expr), 'text') AS TEXT)"
+
+  - name: jsx boolean attribute
+    input: "jsx(<input disabled/>)"
+    expected: "CAST(xml_element_jsx('input/', xml_attrs_jsx('disabled', json('true'))) AS TEXT)"
+
+  - name: jsx nested subquery
+    input: |-
+      SELECT jsx(<ul>{SELECT <li>{name}</li> FROM items}</ul>)
+    expected: "SELECT CAST(xml_element_jsx('ul', (SELECT jsx_agg(xml_element_jsx('li', name)) FROM items)) AS TEXT)"
+
+  - name: jsx json object attribute
+    input: "jsx(<Graph data={{x, y}}/>)"
+    expected: "CAST(xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object('x', x, 'y', y))) AS TEXT)"
+
 # ── FK-guided join resolution ────────────────────────────────────────
 
 fk:

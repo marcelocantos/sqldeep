@@ -1207,3 +1207,67 @@ TEST_CASE("sqlite: jsonml inside json") {
     REQUIRE(rows.size() == 1);
     CHECK(rows[0] == R"({"name":"alice","badge":"[\"b\",\"alice\"]"})");
 }
+
+// ── JSX mode ───────────────────────────────────────────────────────
+
+TEST_CASE("sqlite: jsx static element") {
+    DbGuardXml g;
+    auto result = xml_query(g.db, "SELECT jsx(<div>hello</div>)");
+    CHECK(result == R"(["div","hello"])");
+}
+
+TEST_CASE("sqlite: jsx string attribute") {
+    DbGuardXml g;
+    auto result = xml_query(g.db,
+        R"(SELECT jsx(<div class="card">text</div>))");
+    CHECK(result == R"(["div",{"class":"card"},"text"])");
+}
+
+TEST_CASE("sqlite: jsx preserves json object attribute") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, x INTEGER, y INTEGER)");
+    exec(g.db, "INSERT INTO t VALUES(1, 10, 20)");
+    auto result = xml_query(g.db,
+        "SELECT jsx(<Graph data={{x, y}}/>)"
+        " FROM t LIMIT 1");
+    CHECK(result == R"(["Graph",{"data":{"x":10,"y":20}}])");
+}
+
+TEST_CASE("sqlite: jsx boolean attribute true") {
+    DbGuardXml g;
+    auto result = xml_query(g.db, "SELECT jsx(<input disabled/>)");
+    CHECK(result == R"(["input",{"disabled":true}])");
+}
+
+TEST_CASE("sqlite: jsx boolean attribute false") {
+    DbGuardXml g;
+    auto result = xml_query(g.db, "SELECT jsx(<input checked={false}/>)");
+    CHECK(result == R"(["input",{"checked":false}])");
+}
+
+TEST_CASE("sqlite: jsx mixed static and json attributes") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY)");
+    exec(g.db, "INSERT INTO t VALUES(1)");
+    auto result = xml_query(g.db,
+        R"(SELECT jsx(<Widget title="Sales" config={{color: 'blue'}}/>) FROM t LIMIT 1)");
+    CHECK(result == R"(["Widget",{"title":"Sales","config":{"color":"blue"}}])");
+}
+
+TEST_CASE("sqlite: jsx subquery aggregation") {
+    DbGuardXml g;
+    exec(g.db, R"(
+        CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT);
+        INSERT INTO items VALUES(1, 'apple');
+        INSERT INTO items VALUES(2, 'banana');
+    )");
+    auto result = xml_query(g.db,
+        "SELECT jsx(<ul>{SELECT <li>{name}</li> FROM items ORDER BY id}</ul>)");
+    CHECK(result == R"(["ul",["li","apple"],["li","banana"]])");
+}
+
+TEST_CASE("sqlite: jsonml short form") {
+    DbGuardXml g;
+    auto result = xml_query(g.db, "SELECT jsonml(<div>hello</div>)");
+    CHECK(result == R"(["div","hello"])");
+}

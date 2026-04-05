@@ -453,6 +453,72 @@ static void sd_jsonml_agg_final(sqlite3_context *ctx) {
     sqlite3_result_blob(ctx, p->buf, p->len, sqlite3_free);
 }
 
+// ── xml_attrs_jsx(name1, value1, name2, value2, ...) ──────────────
+// Like xml_attrs_jsonml, but values with SQLite JSON subtype (74) are
+// emitted as raw JSON instead of quoted strings.  This lets json('true'),
+// json_object(...), json_array(...) flow through as live values in the
+// JSONML attributes object.
+
+static void sd_xml_attrs_jsx(sqlite3_context *ctx, int argc,
+                              sqlite3_value **argv) {
+    int i, len = 2; /* {} */
+    int nattrs = 0;
+    if (argc % 2 != 0) {
+        sqlite3_result_error(ctx, "xml_attrs_jsx requires even number of args", -1);
+        return;
+    }
+    for (i = 0; i < argc; i += 2) {
+        const char *name, *val;
+        int namelen, vallen;
+        if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
+        nattrs++;
+        name = (const char *)sqlite3_value_text(argv[i]);
+        namelen = (int)strlen(name);
+        val = (const char *)sqlite3_value_text(argv[i + 1]);
+        vallen = (int)strlen(val);
+        len += 2 + json_escaped_len(name, namelen); /* "name" */
+        len += 1; /* : */
+        if (sqlite3_value_subtype(argv[i + 1]) == 74) {
+            len += vallen; /* raw JSON */
+        } else {
+            len += 2 + json_escaped_len(val, vallen); /* "val" */
+        }
+    }
+    if (nattrs > 1) len += nattrs - 1; /* commas */
+    char *out = (char *)sqlite3_malloc(len + 1);
+    if (!out) { sqlite3_result_error_nomem(ctx); return; }
+    int pos = 0;
+    int written = 0;
+    out[pos++] = '{';
+    for (i = 0; i < argc; i += 2) {
+        const char *name, *val;
+        int namelen, vallen;
+        if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
+        if (written++ > 0) out[pos++] = ',';
+        name = (const char *)sqlite3_value_text(argv[i]);
+        namelen = (int)strlen(name);
+        val = (const char *)sqlite3_value_text(argv[i + 1]);
+        vallen = (int)strlen(val);
+        out[pos++] = '"';
+        json_escape_to(name, namelen, out, &pos);
+        out[pos++] = '"';
+        out[pos++] = ':';
+        if (sqlite3_value_subtype(argv[i + 1]) == 74) {
+            /* JSON-typed value — emit raw */
+            memcpy(out + pos, val, vallen);
+            pos += vallen;
+        } else {
+            /* Plain value — emit as JSON string */
+            out[pos++] = '"';
+            json_escape_to(val, vallen, out, &pos);
+            out[pos++] = '"';
+        }
+    }
+    out[pos++] = '}';
+    out[pos] = '\0';
+    sqlite3_result_blob(ctx, out, pos, sqlite3_free);
+}
+
 // ── Public registration ─────────────────────────────────────────────
 
 int sqldeep_register_sqlite_xml(sqlite3 *db) {
@@ -473,6 +539,16 @@ int sqldeep_register_sqlite_xml(sqlite3 *db) {
                                  0, sd_xml_attrs_jsonml, 0, 0);
     if (rc != SQLITE_OK) return rc;
     rc = sqlite3_create_function(db, "jsonml_agg", 1, SQLITE_UTF8,
+                                 0, 0, sd_jsonml_agg_step, sd_jsonml_agg_final);
+    if (rc != SQLITE_OK) return rc;
+    /* JSX mode: element/agg reuse JSONML implementations; only attrs differs */
+    rc = sqlite3_create_function(db, "xml_element_jsx", -1, SQLITE_UTF8,
+                                 0, sd_xml_element_jsonml, 0, 0);
+    if (rc != SQLITE_OK) return rc;
+    rc = sqlite3_create_function(db, "xml_attrs_jsx", -1, SQLITE_UTF8,
+                                 0, sd_xml_attrs_jsx, 0, 0);
+    if (rc != SQLITE_OK) return rc;
+    rc = sqlite3_create_function(db, "jsx_agg", 1, SQLITE_UTF8,
                                  0, 0, sd_jsonml_agg_step, sd_jsonml_agg_final);
     return rc;
 }

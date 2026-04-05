@@ -329,12 +329,14 @@ struct JoinPath {
     std::vector<Step> steps;
 };
 
+enum class XmlMode { Xml, Jsonml, Jsx };
+
 struct DeepSelect {
     std::variant<ObjectLiteral, ArrayLiteral, SqlParts> projection;
     SqlParts tail;
-    bool singular = false;    // SELECT/1: no json_group_array, add LIMIT 1
-    bool xml_context = false;    // true = use xml_agg instead of json_group_array
-    bool jsonml_context = false; // true = use jsonml_agg instead of xml_agg
+    bool singular = false;      // SELECT/1: no json_group_array, add LIMIT 1
+    bool xml_context = false;   // true = use xml/jsonml/jsx agg
+    XmlMode xml_mode = XmlMode::Xml;
 };
 
 struct RecursiveSelect {
@@ -364,7 +366,7 @@ struct XmlElement {
     };
     std::vector<Child> children;
     bool self_closing = false;
-    bool jsonml = false;  // true = emit _jsonml variant functions
+    XmlMode mode = XmlMode::Xml;
 };
 
 // ── XML dedent ─────────────────────────────────────────────────────
@@ -979,10 +981,12 @@ private:
                 continue;
             }
 
-            // Check for xml_to_jsonml(<...>)
-            if (t.type == TokenType::Ident && t.text == "xml_to_jsonml") {
+            // Check for jsx(<...>), jsonml(<...>), xml_to_jsonml(<...>)
+            if (t.type == TokenType::Ident &&
+                (t.text == "jsx" || t.text == "jsonml" || t.text == "xml_to_jsonml")) {
+                XmlMode wrapper_mode = (t.text == "jsx") ? XmlMode::Jsx : XmlMode::Jsonml;
                 auto st = lex_.save();
-                lex_.next(); // consume xml_to_jsonml
+                lex_.next(); // consume wrapper name
                 Token t2 = lex_.peek();
                 if (t2.type == TokenType::LParen) {
                     lex_.next(); // consume (
@@ -995,11 +999,11 @@ private:
                             lex_.restore(st2); // put back < ident
                             flush_before(t);
                             auto el = parse_xml_element(depth + 1,
-                                                        /*jsonml=*/true);
+                                                        wrapper_mode);
                             xml_dedent(*el);
                             Token close = lex_.peek();
                             if (close.type != TokenType::RParen)
-                                lex_.error("expected ')' after xml_to_jsonml",
+                                lex_.error("expected ')' after XML wrapper",
                                            close.line, close.col);
                             lex_.next(); // consume )
                             parts.push_back(std::move(el));
@@ -1444,14 +1448,14 @@ private:
     }
 
     std::unique_ptr<XmlElement> parse_xml_element(int depth,
-                                                     bool jsonml = false) {
+                                                     XmlMode xml_mode = XmlMode::Xml) {
         Token lt = lex_.next(); // consume <
         if (lt.type != TokenType::Other || lt.text != "<")
             lex_.error("expected '<'", lt.line, lt.col);
         check_depth(depth, lt.line, lt.col);
 
         auto el = std::make_unique<XmlElement>();
-        el->jsonml = jsonml;
+        el->mode = xml_mode;
         el->tag = parse_xml_tag_name();
 
         // Parse attributes until > or />
@@ -1566,7 +1570,7 @@ private:
                     lex_.restore(st);
                     XmlElement::Child child;
                     child.kind = XmlElement::Child::Element;
-                    child.element = parse_xml_element(depth + 1, jsonml);
+                    child.element = parse_xml_element(depth + 1, xml_mode);
                     el->children.push_back(std::move(child));
                     continue;
                 }
@@ -1606,7 +1610,7 @@ private:
                         Token t4 = lex_.peek();
                         lex_.restore(st2);
                         if (t4.type == TokenType::Ident) {
-                            auto xml_el = parse_xml_element(depth + 1, jsonml);
+                            auto xml_el = parse_xml_element(depth + 1, xml_mode);
                             SqlParts proj;
                             proj.push_back(std::move(xml_el));
 
@@ -1622,7 +1626,7 @@ private:
                             ds->tail = std::move(tail);
                             ds->singular = singular;
                             ds->xml_context = true;
-                            ds->jsonml_context = jsonml;
+                            ds->xml_mode = xml_mode;
 
                             Token rb = lex_.next();
                             if (rb.type != TokenType::RBrace)
@@ -1674,7 +1678,7 @@ private:
                     ds->projection = std::move(proj);
                     ds->singular = singular;
                     ds->xml_context = true;
-                    ds->jsonml_context = jsonml;
+                    ds->xml_mode = xml_mode;
 
                     Token rb = lex_.next();
                     if (rb.type != TokenType::RBrace)
@@ -1950,7 +1954,11 @@ private:
             if (nested) out += "(";
             out += "SELECT ";
             if (ds.xml_context && !ds.singular) {
-                out += ds.jsonml_context ? "jsonml_agg(" : "xml_agg(";
+                switch (ds.xml_mode) {
+                case XmlMode::Jsx:    out += "jsx_agg(";    break;
+                case XmlMode::Jsonml: out += "jsonml_agg("; break;
+                default:              out += "xml_agg(";    break;
+                }
                 render_parts(std::get<SqlParts>(ds.projection), out, true);
                 out += ")";
             } else {
@@ -2221,10 +2229,24 @@ private:
     }
 
     void render_xml_element(const XmlElement& el, std::string& out,
-                             bool jsonml_override = false) {
-        bool jsonml = el.jsonml || jsonml_override;
-        const char* fn_element = jsonml ? "xml_element_jsonml('" : "xml_element('";
-        const char* fn_attrs = jsonml ? ", xml_attrs_jsonml(" : ", xml_attrs(";
+                             XmlMode mode_override = XmlMode::Xml) {
+        XmlMode mode = (el.mode != XmlMode::Xml) ? el.mode : mode_override;
+        const char* fn_element;
+        const char* fn_attrs;
+        switch (mode) {
+        case XmlMode::Jsx:
+            fn_element = "xml_element_jsx('";
+            fn_attrs = ", xml_attrs_jsx(";
+            break;
+        case XmlMode::Jsonml:
+            fn_element = "xml_element_jsonml('";
+            fn_attrs = ", xml_attrs_jsonml(";
+            break;
+        default:
+            fn_element = "xml_element('";
+            fn_attrs = ", xml_attrs(";
+            break;
+        }
 
         out += fn_element;
         out += el.tag;
@@ -2239,11 +2261,7 @@ private:
                 out += "'";
                 out += el.attrs[i].name;
                 out += "', ";
-                if (el.attrs[i].is_dynamic) {
-                    render_parts(el.attrs[i].value, out, /*nested=*/true);
-                } else {
-                    render_parts(el.attrs[i].value, out, /*nested=*/true);
-                }
+                render_parts(el.attrs[i].value, out, /*nested=*/true);
             }
             out += ")";
         }
@@ -2266,7 +2284,7 @@ private:
                 render_parts(child.expr, out, /*nested=*/true);
                 break;
             case XmlElement::Child::Element:
-                render_xml_element(*child.element, out, jsonml);
+                render_xml_element(*child.element, out, mode);
                 break;
             }
         }
