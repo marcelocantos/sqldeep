@@ -54,3 +54,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `e7cbb27`
 - **Outcome**: Released v0.9.0. Added XML/HTML literal syntax (`<tag attr={expr}>...</tag>` → `xml_element(...)` calls). Added interactive CLI (`sqldeep`) wrapping SQLite shell with transpilation and XML functions. Updated README, agent guide, NOTICES, STABILITY.md. 363 assertions pass (58 test cases).
+
+## 2026-04-05 — /release v0.10.0
+
+- **Commit**: `fe5cdec`
+- **Outcome**: Released v0.10.0. Extracted XML SQLite functions (`xml_element`, `xml_attrs`, `xml_agg`) into shared `dist/sqldeep_xml.h`/`.c` with public `sqldeep_register_sqlite_xml()`. Go binding gains `RegisterSQLiteXML()`. Fixed `ar` → `libtool` for macOS archive alignment. 363 assertions pass (58 test cases).
