@@ -67,5 +67,5 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-04-05 — /release v0.12.0
 
-- **Commit**: `68f7a46`
+- **Commit**: `4692c1a`
 - **Outcome**: Released v0.12.0. Added `xml_to_jsonml()` transpiler macro for JSONML output — emits `xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg` runtime functions that build JSON arrays directly. Updated README, agents guide, CLAUDE.md, STABILITY.md. 382 assertions pass (67 test cases).
