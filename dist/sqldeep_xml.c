@@ -54,7 +54,15 @@ static void sd_xml_attrs(sqlite3_context *ctx, int argc,
     }
     for (i = 0; i < argc; i += 2) {
         const char *val;
-        if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
+        int vtype = sqlite3_value_type(argv[i + 1]);
+        if (vtype == SQLITE_NULL) continue;
+        if (vtype == SQLITE_INTEGER) {
+            if (sqlite3_value_int(argv[i + 1]) == 0) continue; /* false → omit */
+            /* integer 1 (true) → bare attribute name */
+            len += 1; /* space */
+            len += (int)strlen((const char *)sqlite3_value_text(argv[i]));
+            continue;
+        }
         len += 1; /* space */
         len += (int)strlen((const char *)sqlite3_value_text(argv[i]));
         val = (const char *)sqlite3_value_text(argv[i + 1]);
@@ -65,8 +73,17 @@ static void sd_xml_attrs(sqlite3_context *ctx, int argc,
     int pos = 0;
     for (i = 0; i < argc; i += 2) {
         const char *name, *val;
-        if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
+        int vtype = sqlite3_value_type(argv[i + 1]);
+        if (vtype == SQLITE_NULL) continue;
         name = (const char *)sqlite3_value_text(argv[i]);
+        if (vtype == SQLITE_INTEGER) {
+            if (sqlite3_value_int(argv[i + 1]) == 0) continue; /* false → omit */
+            /* integer 1 (true) → bare attribute name */
+            out[pos++] = ' ';
+            memcpy(out + pos, name, strlen(name));
+            pos += (int)strlen(name);
+            continue;
+        }
         val = (const char *)sqlite3_value_text(argv[i + 1]);
         out[pos++] = ' ';
         memcpy(out + pos, name, strlen(name));

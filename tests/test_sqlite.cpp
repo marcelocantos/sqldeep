@@ -1044,7 +1044,30 @@ TEST_CASE("sqlite: xml dedent multi-line") {
 TEST_CASE("sqlite: xml boolean attribute") {
     DbGuardXml g;
     auto result = xml_query(g.db, "SELECT <input disabled/>");
-    CHECK(result == R"(<input disabled="disabled"/>)");
+    CHECK(result == R"(<input disabled/>)");
+}
+
+TEST_CASE("sqlite: xml dynamic boolean attribute") {
+    DbGuardXml g;
+    exec(g.db, R"(
+        CREATE TABLE flags(id INTEGER PRIMARY KEY, is_checked INTEGER);
+        INSERT INTO flags VALUES(1, 1);
+        INSERT INTO flags VALUES(2, 0);
+    )");
+
+    // integer 1 → bare attribute
+    auto rows1 = query(g.db,
+        "SELECT CAST(xml_element('input/', xml_attrs('checked', is_checked)) AS TEXT) "
+        "FROM flags WHERE id = 1");
+    REQUIRE(rows1.size() == 1);
+    CHECK(rows1[0] == R"(<input checked/>)");
+
+    // integer 0 → attribute omitted
+    auto rows2 = query(g.db,
+        "SELECT CAST(xml_element('input/', xml_attrs('checked', is_checked)) AS TEXT) "
+        "FROM flags WHERE id = 2");
+    REQUIRE(rows2.size() == 1);
+    CHECK(rows2[0] == R"(<input/>)");
 }
 
 TEST_CASE("sqlite: xml subquery") {
