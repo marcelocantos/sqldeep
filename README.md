@@ -288,8 +288,21 @@ with sqldeep transpilation and XML functions (`xml_element`, `xml_attrs`,
 
 ## Integration
 
-Copy the contents of `dist/` (`sqldeep.h`, `sqldeep.cpp`) into your project.
-No external dependencies at runtime.
+Copy `dist/sqldeep.h` and `dist/sqldeep.cpp` into your project and compile as
+C++20. No external dependencies at runtime.
+
+If your project uses XML literals and targets SQLite, also include
+`dist/sqldeep_xml.h` and `dist/sqldeep_xml.c`. These provide reference
+implementations of `xml_element`, `xml_attrs`, and `xml_agg` as SQLite custom
+functions. Register them on each connection:
+
+```c
+#include "sqldeep_xml.h"
+
+sqldeep_register_sqlite_xml(db);  // returns SQLITE_OK on success
+```
+
+`sqldeep_xml.c` compiles as C and requires `sqlite3.h` at compile time.
 
 If you use an agentic coding tool, include `dist/sqldeep-agents-guide.md` in
 your project context.

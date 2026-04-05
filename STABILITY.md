@@ -40,6 +40,15 @@ Snapshot as of v0.9.0.
 | `sqldeep_version` | `const char* sqldeep_version(void)` | **Stable** |
 | `sqldeep_free` | `void sqldeep_free(void* ptr)` | **Stable** |
 
+### XML runtime API (`sqldeep_xml.h`)
+
+| Item | Signature | Stability |
+|------|-----------|-----------|
+| `sqldeep_register_sqlite_xml` | `int sqldeep_register_sqlite_xml(sqlite3* db)` | **Experimental** |
+
+Registers `xml_element`, `xml_attrs`, and `xml_agg` as SQLite custom functions.
+Separate from `sqldeep.h` because it introduces a SQLite dependency.
+
 ### Version macros (`sqldeep.h`)
 
 | Macro | Value | Stability |
@@ -182,9 +191,10 @@ Before 1.0:
   no FROM-first variant, no renamed/computed fields within the recursive shape.
 - **XML literals settling**: New in v0.9.0. `<tag>` syntax, `{expr}`
   interpolation, `{SELECT ...}` subqueries with `xml_agg`, namespaced tags,
-  boolean attributes. The runtime functions (`xml_element`, `xml_attrs`,
-  `xml_agg`) are not part of sqldeep — sqldeep only emits calls to them.
-  Whitespace handling in XML body text is literal (not stripped like JSX).
+  boolean attributes. Reference SQLite implementations of the runtime functions
+  (`xml_element`, `xml_attrs`, `xml_agg`) are provided in `sqldeep_xml.h`/`.c`
+  (v0.10.0). Whitespace handling in XML body text is literal (not stripped
+  like JSX).
 
 ## Known limitations
 
