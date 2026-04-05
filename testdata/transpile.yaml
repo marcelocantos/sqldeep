@@ -86,6 +86,23 @@ convention:
     input: "SELECT coalesce(({name, value}), null) FROM t"
     expected: "SELECT coalesce((json_object('name', name, 'value', value)), null) FROM t"
 
+  # Deep constructs at any paren depth
+  - name: deep select subquery in function call
+    input: "SELECT coalesce((SELECT { id } FROM t), 'none')"
+    expected: "SELECT coalesce((SELECT json_object('id', id) FROM t), 'none')"
+
+  - name: from-first subquery in function call
+    input: "SELECT coalesce((FROM t SELECT { id }), 'none')"
+    expected: "SELECT coalesce((SELECT json_object('id', id) FROM t), 'none')"
+
+  - name: xml literal in function call
+    input: "SELECT upper(<b>{name}</b>) FROM t"
+    expected: "SELECT upper(CAST(xml_element('b', name) AS TEXT)) FROM t"
+
+  - name: jsx wrapper in function call
+    input: "SELECT length(jsx(<div>{x}</div>)) FROM t"
+    expected: "SELECT length(CAST(xml_element_jsx('div', x) AS TEXT)) FROM t"
+
   # Expression with commas
   - name: expression with commas in parens
     input: "SELECT { result: coalesce(a, b) } FROM t"
@@ -731,6 +748,11 @@ convention:
   - name: xml nested subquery
     input: |-
       SELECT <ul>{SELECT <li>{name}</li> FROM items}</ul>
+    expected: "SELECT CAST(xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items)) AS TEXT)"
+
+  - name: xml from-first subquery
+    input: |-
+      SELECT <ul>{FROM items SELECT <li>{name}</li>}</ul>
     expected: "SELECT CAST(xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items)) AS TEXT)"
 
   - name: xml self-closing with dynamic attr

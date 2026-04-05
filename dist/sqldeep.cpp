@@ -811,7 +811,8 @@ private:
         };
 
         bool need_space = false; // space needed after a non-string AST part
-        bool in_from_context = false; // true after FROM/JOIN at depth 0
+        bool in_from_context = false; // true after FROM/JOIN in current scope
+        std::vector<bool> from_context_stack; // saved per paren scope
 
         auto accum_token = [&](const Token& tok) {
             if (has_raw) {
@@ -851,8 +852,8 @@ private:
                 break;
             }
 
-            // Check for (SELECT {/[) pattern — subquery with deep construct
-            if (t.type == TokenType::LParen && paren_depth == 0) {
+            // Check for (SELECT {/[) or (FROM ... SELECT {/[) pattern
+            if (t.type == TokenType::LParen) {
                 auto st = lex_.save();
                 lex_.next(); // consume (
                 Token t2 = lex_.peek();
@@ -871,7 +872,12 @@ private:
                         Token rp = lex_.next(); // consume )
                         if (rp.type != TokenType::RParen)
                             lex_.error("expected ')' after subquery", rp.line, rp.col);
+                        // At paren_depth > 0, we consumed explicit (...)
+                        // so emit parens — the renderer won't add them
+                        // because the part is at the top of a SqlParts.
+                        if (paren_depth > 0) parts.push_back(std::string("("));
                         parts.push_back(std::move(part));
+                        if (paren_depth > 0) parts.push_back(std::string(")"));
                         last_end = rp.src_end;
                         need_space = true;
                         continue;
@@ -906,7 +912,9 @@ private:
                         }
                         parts.push_back(std::string(")"));
                     } else {
+                        if (paren_depth > 0) parts.push_back(std::string("("));
                         parts.push_back(std::move(ds));
+                        if (paren_depth > 0) parts.push_back(std::string(")"));
                     }
                     last_end = rp.src_end;
                     need_space = true;
@@ -917,9 +925,8 @@ private:
                 lex_.restore(st);
             }
 
-            // Check for SELECT[/1] {/[ at depth 0 (top-level deep select)
-            if (is_keyword(t, "SELECT") && paren_depth == 0 &&
-                !stop_at_select) {
+            // Check for SELECT[/1] {/[/xml at any depth
+            if (is_keyword(t, "SELECT") && !stop_at_select) {
                 auto st = lex_.save();
                 lex_.next(); // consume SELECT
                 bool singular = try_consume_singular();
@@ -938,6 +945,8 @@ private:
                     need_space = true;
                     continue;
                 }
+                // SELECT/1 without {/[ — not a deep select. Let the
+                // XML literal or wrapper be picked up by normal handlers.
                 // Not deep — restore and accumulate SELECT as raw SQL
                 lex_.restore(st);
             }
@@ -949,8 +958,7 @@ private:
             }
 
             // Check for FROM-first: FROM ... SELECT {/[
-            if (is_keyword(t, "FROM") && paren_depth == 0 &&
-                !stop_at_select) {
+            if (is_keyword(t, "FROM") && !stop_at_select) {
                 if (is_from_first(stop_comma, stop_rbrace,
                                   stop_rbracket, stop_rparen)) {
                     flush_before(t);
@@ -1021,9 +1029,9 @@ private:
                 lex_.restore(st);
             }
 
-            // Check for XML element: < followed by ident (tag name)
-            if (paren_depth == 0 &&
-                t.type == TokenType::Other && t.text == "<") {
+            // Check for XML element: < followed by ident (tag name).
+            // Unambiguous at any depth — < cannot start a SQL expression.
+            if (t.type == TokenType::Other && t.text == "<") {
                 auto st = lex_.save();
                 lex_.next(); // consume <
                 Token t2 = lex_.peek();
@@ -1040,17 +1048,25 @@ private:
                 lex_.restore(st);
             }
 
-            // Track paren depth
-            if (t.type == TokenType::LParen) ++paren_depth;
+            // Track paren depth with per-scope FROM context
+            if (t.type == TokenType::LParen) {
+                ++paren_depth;
+                from_context_stack.push_back(in_from_context);
+                in_from_context = false; // new scope starts outside FROM
+            }
             if (t.type == TokenType::RParen) {
                 if (paren_depth == 0)
                     lex_.error("unmatched ')'", t.line, t.col);
                 --paren_depth;
+                if (!from_context_stack.empty()) {
+                    in_from_context = from_context_stack.back();
+                    from_context_stack.pop_back();
+                }
             }
 
             // Track FROM context for join path detection.
             // -> and <- are only join operators after FROM/JOIN.
-            if (paren_depth == 0 && t.type == TokenType::Ident) {
+            if (t.type == TokenType::Ident) {
                 if (is_from_or_join(t)) {
                     in_from_context = true;
                 } else if (is_keyword(t, "SELECT") || is_keyword(t, "WHERE") ||
@@ -1063,8 +1079,7 @@ private:
             }
 
             // Check for ident (-> | <-) ... (join path) — only in FROM context
-            if (t.type == TokenType::Ident && paren_depth == 0 &&
-                in_from_context) {
+            if (t.type == TokenType::Ident && in_from_context) {
                 auto st = lex_.save();
                 Token alias_tok = lex_.next(); // consume ident
                 Token arrow = lex_.peek();
@@ -1688,6 +1703,26 @@ private:
                     Token rb = lex_.next();
                     if (rb.type != TokenType::RBrace)
                         lex_.error("expected '}' after subquery",
+                                   rb.line, rb.col);
+                    XmlElement::Child child;
+                    child.kind = XmlElement::Child::Interpolation;
+                    child.expr.push_back(std::move(ds));
+                    el->children.push_back(std::move(child));
+                    continue;
+                }
+
+                // {FROM ... SELECT ...} — FROM-first subquery inside XML
+                if (is_keyword(t2, "FROM") &&
+                    is_from_first(false, true, false, false)) {
+                    auto ds = parse_from_first_select(
+                        /*stop_comma=*/false, /*stop_rbrace=*/true,
+                        /*stop_rbracket=*/false, /*stop_rparen=*/false,
+                        depth + 1);
+                    ds->xml_context = true;
+                    ds->xml_mode = xml_mode;
+                    Token rb = lex_.next();
+                    if (rb.type != TokenType::RBrace)
+                        lex_.error("expected '}' after FROM-first subquery",
                                    rb.line, rb.col);
                     XmlElement::Child child;
                     child.kind = XmlElement::Child::Interpolation;

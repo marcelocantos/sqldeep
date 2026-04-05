@@ -868,6 +868,38 @@ TEST_CASE("sqlite: json -> operator in WHERE") {
     CHECK(rows[0] == R"({"id":1})");
 }
 
+// ── Deep constructs at any paren depth ─────────────────────────────
+
+TEST_CASE("sqlite: deep select in function call") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'alice')");
+    auto rows = transpile_and_query(g.db,
+        "SELECT coalesce((SELECT { id, name } FROM t LIMIT 1), 'none')");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"id":1,"name":"alice"})");
+}
+
+TEST_CASE("sqlite: from-first in function call") {
+    DbGuard g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'bob')");
+    auto rows = transpile_and_query(g.db,
+        "SELECT coalesce((FROM t SELECT { id, name }), 'none') LIMIT 1");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == R"({"id":1,"name":"bob"})");
+}
+
+TEST_CASE("sqlite: xml literal in function call") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'alice')");
+    auto rows = transpile_and_query(g.db,
+        "SELECT upper(<b>{name}</b>) FROM t");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0] == "<B>ALICE</B>");
+}
+
 // ── JSON booleans ──────────────────────────────────────────────────
 
 TEST_CASE("sqlite: true/false in json object") {
