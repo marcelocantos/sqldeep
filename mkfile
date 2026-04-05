@@ -22,6 +22,8 @@ test_objs = $[patsubst %.cpp,build/%.o,$test_srcs]
 !example: build/demo
     ./$input
 
+!shell: build/sqldeep
+
 !clean:
     rm -rf build/ .mk/
 
@@ -31,6 +33,9 @@ build/sqldeep_tests: $test_objs build/sqldeep.o build/sqlite3.o
     $cxx $cxxflags -o $target $inputs
 
 build/demo: build/examples/demo.o build/sqldeep.o
+    $cxx $cxxflags -o $target $inputs
+
+build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqlite3.o
     $cxx $cxxflags -o $target $inputs
 
 $lib: build/sqldeep.o
@@ -47,4 +52,7 @@ build/tests/{name}.o: tests/{name}.cpp
     $cxx $cxxflags $incflags -c $input -o $target
 
 build/examples/{name}.o: examples/{name}.cpp
+    $cxx $cxxflags $incflags -c $input -o $target
+
+build/cmd/{name}.o: cmd/{name}.cpp
     $cxx $cxxflags $incflags -c $input -o $target
