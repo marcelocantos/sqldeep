@@ -52,5 +52,5 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-04-05 — /release v0.9.0
 
-- **Commit**: TBD
+- **Commit**: `e7cbb27`
 - **Outcome**: Released v0.9.0. Added XML/HTML literal syntax (`<tag attr={expr}>...</tag>` → `xml_element(...)` calls). Added interactive CLI (`sqldeep`) wrapping SQLite shell with transpilation and XML functions. Updated README, agent guide, NOTICES, STABILITY.md. 363 assertions pass (58 test cases).
