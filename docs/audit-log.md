@@ -85,6 +85,11 @@ maintenance activities. Append-only — newest entries at the bottom.
 - **Commit**: `e193771`
 - **Outcome**: Released v0.15.0 (darwin-arm64, linux-amd64, linux-arm64). Removed all paren-depth restrictions — deep selects, FROM-first, join paths, XML literals, and SELECT/1 now work at any depth. Per-scope FROM context tracking prevents join arrow leakage across paren boundaries. 435 assertions pass (82 test cases).
 
+## 2026-04-06 — /release v0.18.0
+
+- **Commit**: `e9addbc`
+- **Outcome**: Released v0.18.0 (darwin-arm64, linux-amd64, linux-arm64). Added qualified bare fields (`sm.repo` → key `repo`, value `sm.repo`). 447 assertions pass (84 test cases).
+
 ## 2026-04-06 — /release v0.17.0
 
 - **Commit**: `ac82ccb`
