@@ -5,9 +5,16 @@ package sqldeep
 
 //#include "sqldeep.h"
 //#include "sqldeep_xml.h"
+//#include "sqldeep_auto.h"
 //#include <stdlib.h>
 import "C"
 import "unsafe"
+
+func init() {
+	// Register sqldeep runtime functions as an auto-extension so every
+	// new SQLite connection (including those from go-sqlite3) gets them.
+	C.sqldeep_enable_auto()
+}
 
 // Backend selects the target database for SQL generation.
 type Backend int
@@ -150,13 +157,13 @@ func TranspileFKPostgres(input string, fks []ForeignKey) (string, error) {
 	return TranspileFKBackend(input, fks, Postgres)
 }
 
-// RegisterSQLiteXML registers the xml_element, xml_attrs, and xml_agg
-// functions on a SQLite connection. The db parameter must be an unsafe.Pointer
-// to a C sqlite3* handle (e.g. obtained from a Go SQLite driver).
-func RegisterSQLiteXML(db unsafe.Pointer) error {
-	rc := C.sqldeep_register_sqlite_xml((*C.sqlite3)(db))
+// RegisterSQLite registers all sqldeep runtime functions (XML, JSONML, JSX,
+// and custom JSON functions) on a SQLite connection. The db parameter must be
+// an unsafe.Pointer to a C sqlite3* handle.
+func RegisterSQLite(db unsafe.Pointer) error {
+	rc := C.sqldeep_register_sqlite((*C.sqlite3)(db))
 	if rc != 0 {
-		return &Error{Msg: "failed to register XML functions"}
+		return &Error{Msg: "failed to register sqldeep functions"}
 	}
 	return nil
 }

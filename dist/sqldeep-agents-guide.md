@@ -18,7 +18,7 @@ If your project uses XML literals and targets SQLite, also include
 ```c
 #include "sqldeep_xml.h"
 
-sqldeep_register_sqlite_xml(db);  // call once per connection
+sqldeep_register_sqlite(db);  // call once per connection
 ```
 
 `sqldeep_xml.c` compiles as C (not C++20) and requires `sqlite3.h` at compile

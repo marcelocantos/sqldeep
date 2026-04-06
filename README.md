@@ -339,7 +339,7 @@ functions. Register them on each connection:
 ```c
 #include "sqldeep_xml.h"
 
-sqldeep_register_sqlite_xml(db);  // returns SQLITE_OK on success
+sqldeep_register_sqlite(db);  // returns SQLITE_OK on success
 ```
 
 `sqldeep_xml.c` compiles as C and requires `sqlite3.h` at compile time.

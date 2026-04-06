@@ -48,7 +48,7 @@
   - Empty elements: `<br/>` → `["br"]`
   - Subquery aggregation uses `jsonml_agg` instead of `xml_agg`
   - BLOB protocol: `_jsonml` functions return BLOBs (`[` = element, `{` = attrs)
-  - Registered alongside existing XML functions via `sqldeep_register_sqlite_xml()`
+  - Registered alongside existing XML functions via `sqldeep_register_sqlite()`
   - Transpilation tests and SQLite integration tests
 - **Context**: XML literals are the authoring syntax; JSONML is an easier format for programmatic consumption. Transpiler-level macro avoids wasteful XML→parse→JSONML round-trip — the structure is preserved from the AST through to the runtime functions.
 - **Status**: achieved (v0.12.0)

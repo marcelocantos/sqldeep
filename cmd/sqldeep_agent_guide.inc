@@ -19,7 +19,7 @@ static const char sd_agent_guide[] =
     "```c\n"
     "#include \"sqldeep_xml.h\"\n"
     "\n"
-    "sqldeep_register_sqlite_xml(db);  // call once per connection\n"
+    "sqldeep_register_sqlite(db);  // call once per connection\n"
     "```\n"
     "\n"
     "`sqldeep_xml.c` compiles as C (not C++20) and requires `sqlite3.h` at compile\n"

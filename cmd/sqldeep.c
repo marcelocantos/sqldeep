@@ -13,7 +13,7 @@
 static int sd_register_xml(sqlite3 *db, char **pzErrMsg,
                             const struct sqlite3_api_routines *pApi) {
     (void)pzErrMsg; (void)pApi;
-    return sqldeep_register_sqlite_xml(db);
+    return sqldeep_register_sqlite(db);
 }
 
 /* SQLITE_SHELL_INIT_PROC: called before sqlite3_initialize(). */

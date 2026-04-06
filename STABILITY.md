@@ -44,7 +44,7 @@ Snapshot as of v0.18.0.
 
 | Item | Signature | Stability |
 |------|-----------|-----------|
-| `sqldeep_register_sqlite_xml` | `int sqldeep_register_sqlite_xml(sqlite3* db)` | **Experimental** |
+| `sqldeep_register_sqlite` | `int sqldeep_register_sqlite(sqlite3* db)` | **Experimental** |
 | `sqldeep_json` | `sqldeep_json(text)` returns BLOB | **Experimental** |
 | `sqldeep_json_object` | `sqldeep_json_object(key1, val1, ...)` returns BLOB | **Experimental** |
 | `sqldeep_json_array` | `sqldeep_json_array(val1, val2, ...)` returns BLOB | **Experimental** |

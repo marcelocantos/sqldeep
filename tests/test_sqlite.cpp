@@ -24,7 +24,7 @@ struct DbGuard {
             throw std::runtime_error("failed to open :memory: db");
         // Register custom JSON functions (sqldeep_json_object etc.)
         // which are now part of the transpiler's SQLite output.
-        sqldeep_register_sqlite_xml(db);
+        sqldeep_register_sqlite(db);
     }
     ~DbGuard() { if (db) sqlite3_close(db); }
     DbGuard(const DbGuard&) = delete;
@@ -105,7 +105,7 @@ struct DbGuardXml {
     DbGuardXml() {
         if (sqlite3_open(":memory:", &db) != SQLITE_OK)
             throw std::runtime_error("failed to open :memory: db");
-        sqldeep_register_sqlite_xml(db);
+        sqldeep_register_sqlite(db);
     }
     ~DbGuardXml() { if (db) sqlite3_close(db); }
     DbGuardXml(const DbGuardXml&) = delete;
