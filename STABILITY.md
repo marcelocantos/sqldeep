@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.18.0.
+Snapshot as of v0.19.0.
 
 ### C API (`sqldeep.h`)
 
@@ -59,10 +59,24 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.18.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.19.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `18` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `19` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
+
+### Go API (`go/sqldeep`)
+
+| Item | Signature | Stability |
+|------|-----------|-----------|
+| `Transpile` | `func Transpile(input string) (string, error)` | **Stable** |
+| `TranspileBackend` | `func TranspileBackend(input string, backend Backend) (string, error)` | **Stable** |
+| `TranspilePostgres` | `func TranspilePostgres(input string) (string, error)` | **Stable** |
+| `TranspileFK` | `func TranspileFK(input string, fks []ForeignKey) (string, error)` | **Stable** |
+| `TranspileFKBackend` | `func TranspileFKBackend(input string, fks []ForeignKey, backend Backend) (string, error)` | **Stable** |
+| `TranspileFKPostgres` | `func TranspileFKPostgres(input string, fks []ForeignKey) (string, error)` | **Stable** |
+| `RegisterSQLite` | `func RegisterSQLite(db unsafe.Pointer) error` | **Experimental** |
+| `Version` | `func Version() string` | **Stable** |
+| Auto-extension | `init()` calls `sqlite3_auto_extension` — all connections get sqldeep functions | **Experimental** |
 
 ### Input syntax (DSL)
 
