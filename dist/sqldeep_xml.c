@@ -280,6 +280,25 @@ static void json_escape_to(const char *s, int n, char *out, int *pos) {
     }
 }
 
+// ── Helpers for JSONML/JSX (subtype 74 protocol) ──────────────────
+//
+// JSONML and JSX functions return TEXT with JSON subtype (74) instead
+// of BLOB.  Parent functions detect structured children/attrs by
+// checking sqlite3_value_subtype == 74 and pass them through raw.
+// Plain TEXT (no subtype) gets JSON-escaped.  This means views and
+// subqueries return composable TEXT without CAST — the subtype is
+// preserved through custom functions and re-evaluated per row.
+
+static void result_json(sqlite3_context *ctx, const char *s, int n,
+                         void (*destructor)(void*)) {
+    sqlite3_result_text(ctx, s, n, destructor);
+    sqlite3_result_subtype(ctx, 74);
+}
+
+static int is_json_subtype(sqlite3_value *v) {
+    return sqlite3_value_subtype(v) == 74;
+}
+
 // ── xml_attrs_jsonml(name1, value1, name2, value2, ...) ─────────────
 
 static void sd_xml_attrs_jsonml(sqlite3_context *ctx, int argc,
@@ -328,7 +347,7 @@ static void sd_xml_attrs_jsonml(sqlite3_context *ctx, int argc,
     }
     out[pos++] = '}';
     out[pos] = '\0';
-    sqlite3_result_blob(ctx, out, pos, sqlite3_free);
+    result_json(ctx, out, pos, sqlite3_free);
 }
 
 // ── xml_element_jsonml(tag, [attrs], ...children) ───────────────────
@@ -346,10 +365,10 @@ static void sd_xml_element_jsonml(sqlite3_context *ctx, int argc,
     const char *attrs = NULL;
     int attrslen = 0;
 
-    /* Detect attrs BLOB: starts with '{' */
-    if (argc > 1 && is_xml_blob(argv[1])) {
-        const char *a = (const char *)sqlite3_value_blob(argv[1]);
-        int alen = sqlite3_value_bytes(argv[1]);
+    /* Detect attrs: JSON subtype with leading '{' */
+    if (argc > 1 && is_json_subtype(argv[1])) {
+        const char *a = (const char *)sqlite3_value_text(argv[1]);
+        int alen = (int)strlen(a);
         if (alen > 0 && a[0] == '{') {
             attrs = a;
             attrslen = alen;
@@ -364,12 +383,12 @@ static void sd_xml_element_jsonml(sqlite3_context *ctx, int argc,
         len += 1 + attrslen; /* ,{attrs} */
     }
     for (int i = child_start; i < argc; ++i) {
-        int blen;
         if (sqlite3_value_type(argv[i]) == SQLITE_NULL) continue;
-        if (is_xml_blob(argv[i])) {
-            blen = sqlite3_value_bytes(argv[i]);
-            if (blen == 0) continue; /* empty agg result */
-            len += 1 + blen; /* comma + raw JSONML */
+        if (is_json_subtype(argv[i])) {
+            const char *c = (const char *)sqlite3_value_text(argv[i]);
+            int clen = (int)strlen(c);
+            if (clen == 0) continue; /* empty agg result */
+            len += 1 + clen; /* comma + raw JSONML */
         } else {
             /* Text — JSON string */
             const char *c = (const char *)sqlite3_value_text(argv[i]);
@@ -393,12 +412,13 @@ static void sd_xml_element_jsonml(sqlite3_context *ctx, int argc,
     }
     for (int i = child_start; i < argc; ++i) {
         if (sqlite3_value_type(argv[i]) == SQLITE_NULL) continue;
-        if (is_xml_blob(argv[i])) {
-            int blen = sqlite3_value_bytes(argv[i]);
-            if (blen == 0) continue;
+        if (is_json_subtype(argv[i])) {
+            const char *c = (const char *)sqlite3_value_text(argv[i]);
+            int clen = (int)strlen(c);
+            if (clen == 0) continue;
             out[pos++] = ',';
-            memcpy(out + pos, sqlite3_value_blob(argv[i]), blen);
-            pos += blen;
+            memcpy(out + pos, c, clen);
+            pos += clen;
         } else {
             const char *c = (const char *)sqlite3_value_text(argv[i]);
             int clen = (int)strlen(c);
@@ -410,12 +430,11 @@ static void sd_xml_element_jsonml(sqlite3_context *ctx, int argc,
     }
     out[pos++] = ']';
     out[pos] = '\0';
-    sqlite3_result_blob(ctx, out, pos, sqlite3_free);
+    result_json(ctx, out, pos, sqlite3_free);
 }
 
 // ── jsonml_agg (aggregate) ──────────────────────────────────────────
-// Collects JSONML fragments as comma-separated bytes in a BLOB.
-// xml_element_jsonml splices the result into its children.
+// Collects JSONML fragments as comma-separated TEXT with JSON subtype.
 
 static void sd_jsonml_agg_step(sqlite3_context *ctx, int argc,
                                 sqlite3_value **argv) {
@@ -424,9 +443,10 @@ static void sd_jsonml_agg_step(sqlite3_context *ctx, int argc,
     XmlAggCtx *p = (XmlAggCtx *)sqlite3_aggregate_context(ctx, sizeof(*p));
     if (!p) return;
     if (p->len > 0) xml_agg_append(p, ",", 1);
-    if (is_xml_blob(argv[0])) {
-        int blen = sqlite3_value_bytes(argv[0]);
-        xml_agg_append(p, (const char *)sqlite3_value_blob(argv[0]), blen);
+    if (is_json_subtype(argv[0])) {
+        const char *v = (const char *)sqlite3_value_text(argv[0]);
+        int vlen = (int)strlen(v);
+        xml_agg_append(p, v, vlen);
     } else {
         /* Text child — emit as JSON string */
         const char *v = (const char *)sqlite3_value_text(argv[0]);
@@ -447,10 +467,10 @@ static void sd_jsonml_agg_step(sqlite3_context *ctx, int argc,
 static void sd_jsonml_agg_final(sqlite3_context *ctx) {
     XmlAggCtx *p = (XmlAggCtx *)sqlite3_aggregate_context(ctx, 0);
     if (!p || !p->buf || p->len == 0) {
-        sqlite3_result_blob(ctx, "", 0, SQLITE_STATIC);
+        result_json(ctx, "", 0, SQLITE_STATIC);
         return;
     }
-    sqlite3_result_blob(ctx, p->buf, p->len, sqlite3_free);
+    result_json(ctx, p->buf, p->len, sqlite3_free);
 }
 
 // ── xml_attrs_jsx(name1, value1, name2, value2, ...) ──────────────
@@ -523,7 +543,7 @@ static void sd_xml_attrs_jsx(sqlite3_context *ctx, int argc,
     }
     out[pos++] = '}';
     out[pos] = '\0';
-    sqlite3_result_blob(ctx, out, pos, sqlite3_free);
+    result_json(ctx, out, pos, sqlite3_free);
 }
 
 // ── Public registration ─────────────────────────────────────────────
@@ -533,29 +553,37 @@ int sqldeep_register_sqlite_xml(sqlite3 *db) {
     rc = sqlite3_create_function(db, "xml_element", -1, SQLITE_UTF8,
                                  0, sd_xml_element, 0, 0);
     if (rc != SQLITE_OK) return rc;
-    rc = sqlite3_create_function(db, "xml_attrs", -1, SQLITE_UTF8,
+    rc = sqlite3_create_function(db, "xml_attrs", -1,
+                                 SQLITE_UTF8 | SQLITE_SUBTYPE,
                                  0, sd_xml_attrs, 0, 0);
     if (rc != SQLITE_OK) return rc;
     rc = sqlite3_create_function(db, "xml_agg", 1, SQLITE_UTF8,
                                  0, 0, sd_xml_agg_step, sd_xml_agg_final);
     if (rc != SQLITE_OK) return rc;
-    rc = sqlite3_create_function(db, "xml_element_jsonml", -1, SQLITE_UTF8,
+    /* JSONML/JSX functions use subtype 74 (JSON) for structured output.
+       SQLITE_SUBTYPE is required to read/write subtypes. */
+    rc = sqlite3_create_function(db, "xml_element_jsonml", -1,
+                                 SQLITE_UTF8 | SQLITE_SUBTYPE,
                                  0, sd_xml_element_jsonml, 0, 0);
     if (rc != SQLITE_OK) return rc;
-    rc = sqlite3_create_function(db, "xml_attrs_jsonml", -1, SQLITE_UTF8,
+    rc = sqlite3_create_function(db, "xml_attrs_jsonml", -1,
+                                 SQLITE_UTF8 | SQLITE_SUBTYPE,
                                  0, sd_xml_attrs_jsonml, 0, 0);
     if (rc != SQLITE_OK) return rc;
-    rc = sqlite3_create_function(db, "jsonml_agg", 1, SQLITE_UTF8,
+    rc = sqlite3_create_function(db, "jsonml_agg", 1,
+                                 SQLITE_UTF8 | SQLITE_SUBTYPE,
                                  0, 0, sd_jsonml_agg_step, sd_jsonml_agg_final);
     if (rc != SQLITE_OK) return rc;
-    /* JSX mode: element/agg reuse JSONML implementations; only attrs differs */
-    rc = sqlite3_create_function(db, "xml_element_jsx", -1, SQLITE_UTF8,
+    rc = sqlite3_create_function(db, "xml_element_jsx", -1,
+                                 SQLITE_UTF8 | SQLITE_SUBTYPE,
                                  0, sd_xml_element_jsonml, 0, 0);
     if (rc != SQLITE_OK) return rc;
-    rc = sqlite3_create_function(db, "xml_attrs_jsx", -1, SQLITE_UTF8,
+    rc = sqlite3_create_function(db, "xml_attrs_jsx", -1,
+                                 SQLITE_UTF8 | SQLITE_SUBTYPE,
                                  0, sd_xml_attrs_jsx, 0, 0);
     if (rc != SQLITE_OK) return rc;
-    rc = sqlite3_create_function(db, "jsx_agg", 1, SQLITE_UTF8,
+    rc = sqlite3_create_function(db, "jsx_agg", 1,
+                                 SQLITE_UTF8 | SQLITE_SUBTYPE,
                                  0, 0, sd_jsonml_agg_step, sd_jsonml_agg_final);
     return rc;
 }

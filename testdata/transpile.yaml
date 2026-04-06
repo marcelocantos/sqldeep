@@ -101,7 +101,7 @@ convention:
 
   - name: jsx wrapper in function call
     input: "SELECT length(jsx(<div>{x}</div>)) FROM t"
-    expected: "SELECT length(CAST(xml_element_jsx('div', x) AS TEXT)) FROM t"
+    expected: "SELECT length(xml_element_jsx('div', x)) FROM t"
 
   # Expression with commas
   - name: expression with commas in parens
@@ -172,22 +172,18 @@ convention:
     expected: "SELECT json_object('id', id) FROM t WHERE data->>'type' = 'x'"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE data->>'type' = 'x'"
 
-  # CREATE VIEW — no CAST(... AS TEXT) for XML/JSX/JSONML (preserves BLOB for recomposition)
-  - name: create view with jsx suppresses cast
+  # CREATE VIEW — JSONML/JSX use subtype 74 (no CAST); XML still uses BLOB+CAST
+  - name: create view with jsx no cast
     input: "CREATE VIEW v AS SELECT jsx(<div>{name}</div>) FROM t"
     expected: "CREATE VIEW v AS SELECT xml_element_jsx('div', name) FROM t"
 
-  - name: create view with xml suppresses cast
+  - name: create view with xml keeps cast
     input: "CREATE VIEW v AS SELECT <div>{name}</div> FROM t"
-    expected: "CREATE VIEW v AS SELECT xml_element('div', name) FROM t"
+    expected: "CREATE VIEW v AS SELECT CAST(xml_element('div', name) AS TEXT) FROM t"
 
-  - name: create view with jsonml suppresses cast
+  - name: create view with jsonml no cast
     input: "CREATE VIEW v AS SELECT jsonml(<b>text</b>) FROM t"
     expected: "CREATE VIEW v AS SELECT xml_element_jsonml('b', 'text') FROM t"
-
-  - name: create temp view suppresses cast
-    input: "CREATE TEMPORARY VIEW v AS SELECT jsx(<span/>)"
-    expected: "CREATE TEMPORARY VIEW v AS SELECT xml_element_jsx('span/')"
 
   - name: number with trailing dot not absorbed
     input: "SELECT 1.0 + 2 FROM t"
@@ -828,40 +824,40 @@ convention:
 
   - name: jsonml static element
     input: "jsonml(<div>hello</div>)"
-    expected: "CAST(xml_element_jsonml('div', 'hello') AS TEXT)"
+    expected: "xml_element_jsonml('div', 'hello')"
 
   - name: jsonml self-closing
     input: "jsonml(<br/>)"
-    expected: "CAST(xml_element_jsonml('br/') AS TEXT)"
+    expected: "xml_element_jsonml('br/')"
 
   - name: jsonml with attributes
     input: 'jsonml(<div class="card">text</div>)'
-    expected: "CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), 'text') AS TEXT)"
+    expected: "xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), 'text')"
 
   - name: jsonml dynamic attribute
     input: "jsonml(<span style={style_expr}>text</span>)"
-    expected: "CAST(xml_element_jsonml('span', xml_attrs_jsonml('style', style_expr), 'text') AS TEXT)"
+    expected: "xml_element_jsonml('span', xml_attrs_jsonml('style', style_expr), 'text')"
 
   - name: jsonml interpolation
     input: "jsonml(<td>{property_address}</td>)"
-    expected: "CAST(xml_element_jsonml('td', property_address) AS TEXT)"
+    expected: "xml_element_jsonml('td', property_address)"
 
   - name: jsonml nested elements
     input: "jsonml(<div><span>text</span></div>)"
-    expected: "CAST(xml_element_jsonml('div', xml_element_jsonml('span', 'text')) AS TEXT)"
+    expected: "xml_element_jsonml('div', xml_element_jsonml('span', 'text'))"
 
   - name: jsonml nested subquery
     input: |-
       SELECT jsonml(<ul>{SELECT <li>{name}</li> FROM items}</ul>)
-    expected: "SELECT CAST(xml_element_jsonml('ul', (SELECT jsonml_agg(xml_element_jsonml('li', name)) FROM items)) AS TEXT)"
+    expected: "SELECT xml_element_jsonml('ul', (SELECT jsonml_agg(xml_element_jsonml('li', name)) FROM items))"
 
   - name: jsonml singular subquery
     input: "jsonml(<div>{SELECT/1 <span>{name}</span> FROM t}</div>)"
-    expected: "CAST(xml_element_jsonml('div', (SELECT xml_element_jsonml('span', name) FROM t LIMIT 1)) AS TEXT)"
+    expected: "xml_element_jsonml('div', (SELECT xml_element_jsonml('span', name) FROM t LIMIT 1))"
 
   - name: jsonml inside json
     input: "SELECT { name, card: jsonml(<div>{name}</div>) } FROM items"
-    expected: "SELECT json_object('name', name, 'card', CAST(xml_element_jsonml('div', name) AS TEXT)) FROM items"
+    expected: "SELECT json_object('name', name, 'card', xml_element_jsonml('div', name)) FROM items"
 
   - name: jsonml sql passthrough
     input: "SELECT * FROM t WHERE x < 5"
@@ -871,32 +867,32 @@ convention:
 
   - name: jsx static element
     input: "jsx(<div>hello</div>)"
-    expected: "CAST(xml_element_jsx('div', 'hello') AS TEXT)"
+    expected: "xml_element_jsx('div', 'hello')"
 
   - name: jsx with attributes
     input: 'jsx(<div class="card">text</div>)'
-    expected: "CAST(xml_element_jsx('div', xml_attrs_jsx('class', 'card'), 'text') AS TEXT)"
+    expected: "xml_element_jsx('div', xml_attrs_jsx('class', 'card'), 'text')"
 
   - name: jsx dynamic attribute
     input: "jsx(<span style={style_expr}>text</span>)"
-    expected: "CAST(xml_element_jsx('span', xml_attrs_jsx('style', style_expr), 'text') AS TEXT)"
+    expected: "xml_element_jsx('span', xml_attrs_jsx('style', style_expr), 'text')"
 
   - name: jsx boolean attribute
     input: "jsx(<input disabled/>)"
-    expected: "CAST(xml_element_jsx('input/', xml_attrs_jsx('disabled', json('true'))) AS TEXT)"
+    expected: "xml_element_jsx('input/', xml_attrs_jsx('disabled', json('true')))"
 
   - name: jsx nested subquery
     input: |-
       SELECT jsx(<ul>{SELECT <li>{name}</li> FROM items}</ul>)
-    expected: "SELECT CAST(xml_element_jsx('ul', (SELECT jsx_agg(xml_element_jsx('li', name)) FROM items)) AS TEXT)"
+    expected: "SELECT xml_element_jsx('ul', (SELECT jsx_agg(xml_element_jsx('li', name)) FROM items))"
 
   - name: jsx singular select
     input: "SELECT/1 jsx(<div>{name}</div>) FROM t"
-    expected: "SELECT CAST(xml_element_jsx('div', name) AS TEXT) FROM t LIMIT 1"
+    expected: "SELECT xml_element_jsx('div', name) FROM t LIMIT 1"
 
   - name: jsx json object attribute
     input: "jsx(<Graph data={{x, y}}/>)"
-    expected: "CAST(xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object('x', x, 'y', y))) AS TEXT)"
+    expected: "xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object('x', x, 'y', y)))"
 
 # ── FK-guided join resolution ────────────────────────────────────────
 

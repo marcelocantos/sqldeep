@@ -1972,30 +1972,8 @@ public:
 
     std::string render_document(const SqlParts& parts) {
         std::string out;
-        // Suppress CAST(... AS TEXT) for XML/JSX/JSONML inside CREATE VIEW.
-        // Views are designed for recomposition — the BLOB type must be
-        // preserved so outer queries can splice the result without
-        // double-encoding.
-        bool cast_xml = !is_create_view(parts);
-        render_parts(parts, out, /*nested=*/false, cast_xml);
+        render_parts(parts, out, /*nested=*/false, /*cast_xml=*/true);
         return out;
-    }
-
-    static bool is_create_view(const SqlParts& parts) {
-        for (const auto& part : parts) {
-            const auto* s = std::get_if<std::string>(&part);
-            if (!s) break;
-            // Find the first non-empty string part and check for CREATE VIEW
-            if (s->empty()) continue;
-            std::string upper;
-            upper.reserve(s->size());
-            for (char c : *s)
-                upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            // Match CREATE [TEMPORARY|TEMP] VIEW
-            return upper.find("CREATE") != std::string::npos &&
-                   upper.find("VIEW") != std::string::npos;
-        }
-        return false;
     }
 
 private:
@@ -2017,9 +1995,12 @@ private:
                 } else if constexpr (std::is_same_v<T, std::unique_ptr<RecursiveSelect>>) {
                     render_recursive_select(*v, out);
                 } else if constexpr (std::is_same_v<T, std::unique_ptr<XmlElement>>) {
-                    if (cast_xml) out += "CAST(";
+                    // CAST only for XML mode (BLOB→TEXT). JSONML/JSX
+                    // return TEXT with JSON subtype — no CAST needed.
+                    bool need_cast = cast_xml && v->mode == XmlMode::Xml;
+                    if (need_cast) out += "CAST(";
                     render_xml_element(*v, out);
-                    if (cast_xml) out += " AS TEXT)";
+                    if (need_cast) out += " AS TEXT)";
                 }
             }, part);
         }
