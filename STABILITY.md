@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.16.0.
+Snapshot as of v0.17.0.
 
 ### C API (`sqldeep.h`)
 
@@ -45,17 +45,23 @@ Snapshot as of v0.16.0.
 | Item | Signature | Stability |
 |------|-----------|-----------|
 | `sqldeep_register_sqlite_xml` | `int sqldeep_register_sqlite_xml(sqlite3* db)` | **Experimental** |
+| `sqldeep_json` | `sqldeep_json(text)` returns BLOB | **Experimental** |
+| `sqldeep_json_object` | `sqldeep_json_object(key1, val1, ...)` returns BLOB | **Experimental** |
+| `sqldeep_json_array` | `sqldeep_json_array(val1, val2, ...)` returns BLOB | **Experimental** |
+| `sqldeep_json_group_array` | `sqldeep_json_group_array(val)` aggregate, returns BLOB | **Experimental** |
 
 Registers `xml_element`, `xml_attrs`, and `xml_agg` as SQLite custom functions.
+Also registers `sqldeep_json`, `sqldeep_json_object`, `sqldeep_json_array`, and
+`sqldeep_json_group_array` as custom JSON functions that return BLOBs.
 Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 ### Version macros (`sqldeep.h`)
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.16.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.17.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `16` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `17` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
@@ -106,7 +112,7 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | XML inside JSON | `{ card: <div>{name}</div> }` | **Experimental** |
 | JSON object inside XML | `<td>{{name, qty}}</td>` | **Experimental** |
 | Literal brace in XML | `{'{'}` | **Experimental** |
-| JSON booleans | `{ active: true }` → `json('true')` auto-wrapping | **Experimental** |
+| JSON booleans | `{ active: true }` → `sqldeep_json('true')` auto-wrapping | **Experimental** |
 | JSONML output | `jsonml(<tag>...</tag>)` | **Experimental** |
 | JSONML subquery | `jsonml(<ul>{SELECT ...}</ul>)` | **Experimental** |
 | JSX output | `jsx(<tag>...</tag>)` | **Experimental** |
@@ -137,19 +143,23 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | Recursive select | `WITH RECURSIVE` 3-CTE bracket-injection template | **Experimental** |
 | XML void element | `xml_element('tag/')` → `<tag/>` (self-closing) | **Experimental** |
 | XML non-void element | `xml_element('tag')` → `<tag></tag>` (open+close) | **Experimental** |
-| XML element (top-level) | `CAST(xml_element('tag', xml_attrs(...), ...) AS TEXT)` | **Experimental** |
-| XML element (nested) | `xml_element(...)` (no CAST — BLOB consumed by parent) | **Experimental** |
-| XML inside JSON | `CAST(xml_element(...) AS TEXT)` at JSON boundary | **Experimental** |
+| XML element (top-level) | `xml_element('tag', xml_attrs(...), ...)` — BLOB output | **Experimental** |
+| XML element (nested) | `xml_element(...)` (BLOB consumed by parent) | **Experimental** |
+| XML inside JSON | `sqldeep_json_object('card', xml_element(...))` — custom JSON handles BLOB natively | **Experimental** |
 | XML subquery aggregation | `xml_agg(xml_element(...))` | **Experimental** |
-| JSON boolean wrapping | Standalone `true`/`false` → `json('true')`/`json('false')` | **Experimental** |
-| Boolean attrs (XML) | `json('true')` → bare attr; `json('false')` → omit | **Experimental** |
-| Boolean attrs (JSX) | `json('true')` → `true` in attrs object | **Experimental** |
-| JSONML element | `xml_element_jsonml(...)` → TEXT with subtype 74 (no CAST) | **Experimental** |
-| JSONML attrs | `xml_attrs_jsonml(...)` → `{"k":"v",...}` TEXT with subtype 74 | **Experimental** |
-| JSONML subquery aggregation | `jsonml_agg(...)` → TEXT with subtype 74 | **Experimental** |
-| JSX element | `xml_element_jsx(...)` → TEXT with subtype 74 (no CAST) | **Experimental** |
-| JSX attrs | `xml_attrs_jsx(...)` → preserves subtype-74 values as raw JSON | **Experimental** |
-| JSX subquery aggregation | `jsx_agg(...)` → TEXT with subtype 74 | **Experimental** |
+| JSON boolean wrapping | Standalone `true`/`false` → `sqldeep_json('true')`/`sqldeep_json('false')` | **Experimental** |
+| Boolean attrs (XML) | `sqldeep_json('true')` → bare attr; `sqldeep_json('false')` → omit | **Experimental** |
+| Boolean attrs (JSX) | `sqldeep_json('true')` → `true` in attrs object | **Experimental** |
+| `sqldeep_json_object` output | `sqldeep_json_object(k, v, ...)` → BLOB (not TEXT) | **Experimental** |
+| `sqldeep_json_array` output | `sqldeep_json_array(v, ...)` → BLOB | **Experimental** |
+| `sqldeep_json_group_array` output | `sqldeep_json_group_array(v)` aggregate → BLOB | **Experimental** |
+| `sqldeep_json` output | `sqldeep_json(text)` → BLOB | **Experimental** |
+| JSONML element | `xml_element_jsonml(...)` → BLOB (no CAST, no subtype) | **Experimental** |
+| JSONML attrs | `xml_attrs_jsonml(...)` → `{"k":"v",...}` BLOB | **Experimental** |
+| JSONML subquery aggregation | `jsonml_agg(...)` → BLOB | **Experimental** |
+| JSX element | `xml_element_jsx(...)` → BLOB (no CAST, no subtype) | **Experimental** |
+| JSX attrs | `xml_attrs_jsx(...)` → BLOB, preserves JSON-typed values | **Experimental** |
+| JSX subquery aggregation | `jsx_agg(...)` → BLOB | **Experimental** |
 
 ### Parser behaviour
 
@@ -197,6 +207,12 @@ The following were evaluated during the pre-1.0 period and are now settled:
   saved/restored on `(`/`)`) prevents context leakage across paren boundaries.
   `<ident` is recognised as XML at any depth — `<` cannot start a SQL
   expression, so the ambiguity with less-than doesn't apply.
+- **BLOB protocol** (v0.17.0): All structured values (XML, JSONML, JSX, JSON
+  objects/arrays, booleans) use SQLite BLOBs as the type-tagging mechanism.
+  BLOBs starting with `<` are XML; all others are JSON. This eliminates
+  dependence on SQLite subtypes (which don't survive views, CTEs, or subqueries)
+  and removes the need for `CAST(... AS TEXT)` at boundaries. BLOB values are
+  valid UTF-8 and coerce to text in CLI tools and language bindings.
 
 ## Gaps and prerequisites
 
@@ -220,21 +236,35 @@ Before 1.0:
   boolean attributes. Reference SQLite implementations of the runtime functions
   (`xml_element`, `xml_attrs`, `xml_agg`) are provided in `sqldeep_xml.h`/`.c`
   (v0.10.0). v0.11.0 switched from sentinel byte to BLOB type protocol —
-  XML functions return BLOBs internally, transpiler emits `CAST(... AS TEXT)`
-  at top-level and JSON boundaries. v0.13.0 added self-closing/non-void
+  XML functions return BLOBs internally. v0.13.0 added self-closing/non-void
   distinction (`xml_element('br/')` for void elements), empty non-void
   rendering (`<div></div>` instead of `<div/>`), and multi-line dedent
-  (common whitespace prefix stripping).
+  (common whitespace prefix stripping). v0.17.0 removes `CAST(... AS TEXT)` at
+  all boundaries — XML and JSON are now pure BLOB throughout; coercion to text
+  happens only at CLI output and language binding boundaries.
 - **JSONML output settling**: Introduced v0.12.0 as `xml_to_jsonml(...)`, renamed
   to `jsonml(...)` in v0.14.0. Emits `xml_element_jsonml`/`xml_attrs_jsonml`/`jsonml_agg`
-  calls that produce JSONML JSON arrays. Same BLOB protocol as XML functions.
+  calls that produce JSONML JSON arrays as BLOBs. v0.16.0 used SQLite subtype 74
+  for type-tagging; v0.17.0 switched to pure BLOB protocol (no subtype dependency).
+  Needs real-world usage to confirm the BLOB protocol is robust across views, CTEs,
+  and subqueries.
 - **JSX output mode settling**: New in v0.14.0. `jsx(...)` wrapper preserves
-  JSON-typed attribute values (objects, arrays, booleans) via SQLite subtype 74
-  detection in `xml_attrs_jsx`. Needs real-world usage to confirm the subtype
-  detection approach is robust.
+  JSON-typed attribute values (objects, arrays, booleans). v0.16.0 used SQLite
+  subtype 74 detection in `xml_attrs_jsx`; v0.17.0 switched to pure BLOB protocol
+  eliminating subtype dependency. Needs real-world usage to confirm BLOB
+  coercion behaviour is correct in all contexts.
 - **JSON boolean auto-wrapping settling**: New in v0.14.0. Standalone `true`/`false`
-  in JSON/XML value contexts auto-wrap as `json('true')`/`json('false')`.
-  Only applies to single-token values, not compound expressions.
+  in JSON/XML value contexts auto-wrap. v0.17.0 changed wrapping from
+  `json('true')`/`json('false')` to `sqldeep_json('true')`/`sqldeep_json('false')`
+  to return BLOB instead of TEXT. Only applies to single-token values, not
+  compound expressions.
+- **Custom JSON functions settling**: New in v0.17.0. `sqldeep_json_object`,
+  `sqldeep_json_array`, `sqldeep_json_group_array`, and `sqldeep_json` replace
+  the built-in SQLite `json_object`/`json_array`/`json_group_array`/`json` calls
+  at output boundaries, returning BLOBs instead of TEXT. This enables seamless
+  composition with XML BLOBs without type-boundary CAST calls. Needs real-world
+  usage to confirm the BLOB protocol round-trips correctly through all SQL
+  contexts (views, CTEs, subqueries, language bindings).
 
 ## Known limitations
 
