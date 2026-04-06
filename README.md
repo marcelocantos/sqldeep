@@ -2,7 +2,7 @@
 
 A transpiler that converts JSON5-like SQL syntax into standard SQL with
 database-specific JSON functions. Write nested JSON queries naturally; sqldeep
-rewrites them into `json_object()` / `jsonb_build_object()`, etc. Supports
+rewrites them into `sqldeep_json_object()` / `jsonb_build_object()`, etc. Supports
 SQLite (default) and PostgreSQL backends.
 
 ## Example
@@ -22,9 +22,9 @@ FROM customers c SELECT {
 **Output:**
 
 ```sql
-SELECT json_object('customers_id', customers_id, 'name', name, 'orders',
-  (SELECT json_group_array(json_object('orders_id', orders_id, 'total', total, 'vendor',
-    (SELECT json_object('vendor_name', v.name)
+SELECT sqldeep_json_object('customers_id', customers_id, 'name', name, 'orders',
+  (SELECT sqldeep_json_group_array(sqldeep_json_object('orders_id', orders_id, 'total', total, 'vendor',
+    (SELECT sqldeep_json_object('vendor_name', v.name)
      FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)))
    FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id))
 FROM customers c
@@ -64,7 +64,7 @@ Use `{ }` with `SELECT` to construct JSON objects:
 SELECT { id, name } FROM users
 -- or equivalently:
 FROM users SELECT { id, name }
--- → SELECT json_object('id', id, 'name', name) FROM users
+-- → SELECT sqldeep_json_object('id', id, 'name', name) FROM users
 ```
 
 Three field forms:
@@ -81,21 +81,21 @@ Use `[ ]` for inline JSON arrays:
 
 ```sql
 SELECT { tags: [1, 2, 3] } FROM items
--- → SELECT json_object('tags', json_array(1, 2, 3)) FROM items
+-- → SELECT sqldeep_json_object('tags', sqldeep_json_array(1, 2, 3)) FROM items
 ```
 
 ### Nested subqueries
 
 When a field value is `SELECT { }` or `SELECT [ ]`, sqldeep wraps it as a
-correlated subquery with `json_group_array()`:
+correlated subquery with `sqldeep_json_group_array()`:
 
 ```sql
 SELECT {
     id,
     orders: SELECT { total } FROM orders WHERE cid = c.id,
 } FROM customers c
--- → SELECT json_object('id', id, 'orders',
---     (SELECT json_group_array(json_object('total', total))
+-- → SELECT sqldeep_json_object('id', id, 'orders',
+--     (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total))
 --      FROM orders WHERE cid = c.id))
 --   FROM customers c
 ```
@@ -104,7 +104,7 @@ Nesting works to arbitrary depth.
 
 ### Singular select (`SELECT/1`)
 
-Use `SELECT/1` for single-row projections. It skips `json_group_array()`
+Use `SELECT/1` for single-row projections. It skips `sqldeep_json_group_array()`
 wrapping and appends `LIMIT 1`, returning a single object (or null) instead of
 an array:
 
@@ -113,8 +113,8 @@ SELECT {
     orders_id,
     vendor: SELECT/1 { name } FROM o<-vendors v,
 } FROM orders o
--- → SELECT json_object('orders_id', orders_id,
---     'vendor', (SELECT json_object('name', name)
+-- → SELECT sqldeep_json_object('orders_id', orders_id,
+--     'vendor', (SELECT sqldeep_json_object('name', name)
 --      FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1))
 --   FROM orders o
 ```
@@ -198,23 +198,23 @@ SELECT <table class="products">
     <td>{'$' || price}</td>
   </tr> FROM items ORDER BY name}
 </table>
--- → SELECT CAST(xml_element('table', xml_attrs('class', 'products'),
+-- → SELECT xml_element('table', xml_attrs('class', 'products'),
 --     xml_element('tr', xml_element('th', 'Item'), xml_element('th', 'Price')),
 --     (SELECT xml_agg(xml_element('tr',
 --       xml_element('td', name), xml_element('td', '$' || price)))
---      FROM items ORDER BY name)) AS TEXT)
+--      FROM items ORDER BY name))
 ```
 
 - `<tag attr="static" dynamic={expr}>...</tag>` → `xml_element('tag', xml_attrs(...), ...)`
 - `{expr}` interpolation in content and attributes
-- `{SELECT ...}` subqueries aggregate with `xml_agg()` instead of `json_group_array()`
+- `{SELECT ...}` subqueries aggregate with `xml_agg()` instead of `sqldeep_json_group_array()`
 - `{SELECT/1 ...}` singular subquery (no aggregation, adds `LIMIT 1`)
 - Self-closing void elements: `<br/>`, `<img src={url}/>` — rendered as `<br/>` (never `<br></br>`)
 - Non-void empty elements: `<div></div>` — rendered as `<div></div>` (never `<div/>`)
-- Boolean attributes: `<input disabled/>` — uses `json('true')` to distinguish
+- Boolean attributes: `<input disabled/>` — uses `sqldeep_json('true')` to distinguish
   booleans from integers. In XML mode renders as `disabled`, in JSX mode as `true`.
 - Namespaced tags: `<ui:Table.Cell>` for component frameworks
-- Computed key: `{ (expr): val }` → `json_object(expr, val)` (runtime key)
+- Computed key: `{ (expr): val }` → `sqldeep_json_object(expr, val)` (runtime key)
 - XML inside JSON: `{ name, card: <div>{name}</div> }` — XML expression as field value
 - JSON inside XML: `<td>{{name, qty}}</td>` — double braces for JSON object interpolation
 - JSON path in XML: `<td>{(data).field}</td>` — existing path syntax works inside interpolation
@@ -222,7 +222,7 @@ SELECT <table class="products">
 - Multi-line dedent: common leading whitespace is stripped, so source indentation
   produces relative indentation in output
 - JSON booleans: standalone `true`/`false` in JSON object fields, array elements,
-  and XML contexts are auto-wrapped as `json('true')`/`json('false')` to preserve
+  and XML contexts are auto-wrapped as `sqldeep_json('true')`/`sqldeep_json('false')` to preserve
   proper JSON boolean semantics (emits `true`/`false` not `1`/`0`)
 
 #### Output modes

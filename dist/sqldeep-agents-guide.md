@@ -81,17 +81,17 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 
 | Input pattern | Output |
 |---|---|
-| `SELECT { fields } FROM ...` | `SELECT json_object(...) FROM ...` |
+| `SELECT { fields } FROM ...` | `SELECT sqldeep_json_object(...) FROM ...` |
 | `FROM ... SELECT { fields }` | same (FROM-first alternative) |
-| Nested deep select | `(SELECT json_group_array(json_object(...)) FROM ...)` |
-| `SELECT [expr] FROM ...` | `SELECT json_group_array(expr) FROM ...` |
+| Nested deep select | `(SELECT sqldeep_json_group_array(sqldeep_json_object(...)) FROM ...)` |
+| `SELECT [expr] FROM ...` | `SELECT sqldeep_json_group_array(expr) FROM ...` |
 | `FROM ... SELECT [expr]` | same (FROM-first alternative) |
-| `SELECT/1 { fields } FROM ...` | `SELECT json_object(...) FROM ... LIMIT 1` (singular) |
+| `SELECT/1 { fields } FROM ...` | `SELECT sqldeep_json_object(...) FROM ... LIMIT 1` (singular) |
 | `SELECT/1 [expr] FROM ...` | `SELECT expr FROM ... LIMIT 1` (singular) |
 | `FROM ... SELECT/1 { fields }` | same (FROM-first singular) |
 | `FROM ... SELECT expr` | `SELECT expr FROM ...` (plain rearrangement) |
-| `[expr, ...]` | `json_array(...)` |
-| `{ fields }` (inline) | `json_object(...)` |
+| `[expr, ...]` | `sqldeep_json_array(...)` |
+| `{ fields }` (inline) | `sqldeep_json_object(...)` |
 
 ### Field forms
 
@@ -101,7 +101,7 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 | Renamed | `order_id: id` | `'order_id', id` |
 | Quoted key | `"order id": id` | `'order id', id` |
 | Computed key | `(expr): val` | `expr, val` |
-| Aggregate | `field: SELECT expr` | `'field', json_group_array(expr)` |
+| Aggregate | `field: SELECT expr` | `'field', sqldeep_json_group_array(expr)` |
 | Singular aggregate | `field: SELECT/1 expr` | `'field', expr` |
 
 - Join paths:
@@ -130,19 +130,19 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - XML subquery: `{SELECT <li>{name}</li> FROM t}` → `(SELECT xml_agg(xml_element('li', name)) FROM t)`
 - XML singular subquery: `{SELECT/1 <span>{name}</span> FROM t}` → `(SELECT xml_element(...) FROM t LIMIT 1)`
 - XML namespaced tags: `<ui:Table.Cell>` → `xml_element('ui:Table.Cell', ...)`
-- XML boolean attribute: `<input disabled/>` → `xml_attrs('disabled', json('true'))`.
-  Uses `json('true')`/`json('false')` (subtype 74) to distinguish booleans from integers.
-- XML inside JSON: `{ card: <div>{name}</div> }` → `json_object('card', CAST(xml_element(...) AS TEXT))`
-- JSON inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object(...))`
+- XML boolean attribute: `<input disabled/>` → `xml_attrs('disabled', sqldeep_json('true'))`.
+  Uses BLOB protocol to distinguish booleans from integers.
+- XML inside JSON: `{ card: <div>{name}</div> }` → `sqldeep_json_object('card', xml_element('div', name))`
+- JSON inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', sqldeep_json_object(...))`
 - JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
 - Literal brace in XML: `{'{'}` → `'{'`
 - JSON booleans: standalone `true`/`false` in JSON object fields, array elements,
-  and XML attribute/interpolation contexts are auto-wrapped as `json('true')`/`json('false')`
+  and XML attribute/interpolation contexts are auto-wrapped as `sqldeep_json('true')`/`sqldeep_json('false')`
   to preserve proper JSON boolean semantics (not integer 1/0).
-- JSONML output: `jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`
+- JSONML output: `jsonml(<div class="card">{name}</div>)` → `xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name)` producing `["div",{"class":"card"},"alice"]`
 - JSONML subquery: `jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
-- JSX output: `jsx(<Graph data={{x, y}} label="Sales"/>)` → `CAST(xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object(...), 'label', 'Sales')) AS TEXT)`.
-  Like JSONML but preserves JSON-typed attribute values (subtype 74) as raw JSON
+- JSX output: `jsx(<Graph data={{x, y}} label="Sales"/>)` → `xml_element_jsx('Graph/', xml_attrs_jsx('data', sqldeep_json_object(...), 'label', 'Sales'))`.
+  Like JSONML but preserves JSON-typed attribute values (BLOB protocol) as raw JSON
   in the attributes object. Boolean attributes (`<input disabled/>`) produce `{"disabled":true}` in JSX mode.
 - JSX subquery: `jsx(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsx_agg`
 - `--` line comments and `/* ... */` block comments are stripped.

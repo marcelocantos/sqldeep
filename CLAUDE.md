@@ -24,8 +24,8 @@ system (`mkfile`).
 ## Architecture
 
 Pure `string → string` transformation. No database dependency. The `Backend`
-enum selects which JSON function names to emit (SQLite: `json_object`,
-`json_array`, `json_group_array`; PostgreSQL: `jsonb_build_object`,
+enum selects which JSON function names to emit (SQLite: `sqldeep_json_object`,
+`sqldeep_json_array`, `sqldeep_json_group_array`; PostgreSQL: `jsonb_build_object`,
 `jsonb_build_array`, `jsonb_agg`). All other SQL (JOIN, WHERE, LIMIT, etc.)
 is standard and works unchanged across backends.
 
@@ -75,21 +75,21 @@ is standard and works unchanged across backends.
 
 ### Syntax
 
-- `SELECT { fields } FROM ...` → `SELECT json_object(...) FROM ...`
+- `SELECT { fields } FROM ...` → `SELECT sqldeep_json_object(...) FROM ...`
 - `FROM ... SELECT { fields }` → same output (FROM-first alternative)
-- Nested `SELECT { ... } FROM ...` → `(SELECT json_group_array(json_object(...)) FROM ...)`
+- Nested `SELECT { ... } FROM ...` → `(SELECT sqldeep_json_group_array(sqldeep_json_object(...)) FROM ...)`
 - Nested `FROM ... SELECT { ... }` → same output (FROM-first alternative)
-- `SELECT [expr] FROM ...` → `SELECT json_group_array(expr) FROM ...`
+- `SELECT [expr] FROM ...` → `SELECT sqldeep_json_group_array(expr) FROM ...`
 - `FROM ... SELECT [expr]` → same output (FROM-first alternative)
-- `SELECT/1 { fields } FROM ...` → `SELECT json_object(...) FROM ... LIMIT 1` (singular: one row, no array wrapping)
+- `SELECT/1 { fields } FROM ...` → `SELECT sqldeep_json_object(...) FROM ... LIMIT 1` (singular: one row, no array wrapping)
 - `SELECT/1 [expr] FROM ...` → `SELECT expr FROM ... LIMIT 1` (singular array: single element unwrapped)
 - `FROM ... SELECT/1 { fields }` → same output (FROM-first alternative)
-- Nested `SELECT/1 { ... }` → `(SELECT json_object(...) FROM ... LIMIT 1)` (returns object or null)
+- Nested `SELECT/1 { ... }` → `(SELECT sqldeep_json_object(...) FROM ... LIMIT 1)` (returns object or null)
 - `FROM ... SELECT expr` → `SELECT expr FROM ...` (plain rearrangement, no JSON wrapping)
-- `field: SELECT expr` (inside `{ }`, no FROM) → `'field', json_group_array(expr)` (aggregate over current GROUP BY scope)
+- `field: SELECT expr` (inside `{ }`, no FROM) → `'field', sqldeep_json_group_array(expr)` (aggregate over current GROUP BY scope)
 - `field: SELECT/1 expr` (inside `{ }`, no FROM) → `'field', expr` (singular: no array wrapping)
-- `[expr, ...]` → `json_array(...)`
-- `{ fields }` → `json_object(...)` (inline)
+- `[expr, ...]` → `sqldeep_json_array(...)`
+- `{ fields }` → `sqldeep_json_object(...)` (inline)
 - Bare field: `id,` → `'id', id`
 - Renamed: `order_id: id` → `'order_id', id`
 - Double-quoted key: `"order id": id` → `'order id', id`
@@ -110,7 +110,7 @@ is standard and works unchanged across backends.
   (same column name(s) in both tables, standard SQL style)
 - ON/USING in chains: `c->orders o ON id = cust_id->items i ON oid = order_ref`
   (each step can have its own ON/USING; steps without fall back to convention/FK)
-- JSON path: `(expr).field.sub[n]` → `json_extract(expr, '$.field.sub[n]')` (SQLite)
+- JSON path: `(expr).field.sub[n]` → `json_extract(CAST((expr) AS TEXT), '$.field.sub[n]')` (SQLite)
   / `jsonb_extract_path(expr, 'field', 'sub', 'n')` (PostgreSQL).
   Parentheses around the base expression disambiguate from `table.column`.
   Works at any paren depth (e.g. `upper((data).name)`).
@@ -134,24 +134,23 @@ is standard and works unchanged across backends.
 - XML singular subquery: `{SELECT/1 <span>{name}</span> FROM t}`
   → `(SELECT xml_element('span', name) FROM t LIMIT 1)`
 - XML namespaced tags: `<ui:Table.Cell>` → `xml_element('ui:Table.Cell', ...)`
-- XML boolean attribute: `<input disabled/>` → `xml_element('input', xml_attrs('disabled', json('true')))`
-  Uses `json('true')`/`json('false')` (subtype 74) to distinguish booleans from plain integers.
-  `json('true')` → bare attribute name; `json('false')` → omit; plain integer `1` → `name="1"`.
-- XML inside JSON: `{ card: <div>{name}</div> }` → `json_object('card', xml_element('div', name))`
-- JSON object inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', json_object('name', name, 'qty', qty))`
-- JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(data, '$.field'))`
+- XML boolean attribute: `<input disabled/>` → `xml_element('input', xml_attrs('disabled', sqldeep_json('true')))`
+  Uses BLOB protocol (`sqldeep_json('true')`/`sqldeep_json('false')`) to distinguish booleans from plain integers.
+  `sqldeep_json('true')` → bare attribute name; `sqldeep_json('false')` → omit; plain integer `1` → `name="1"`.
+- XML inside JSON: `{ card: <div>{name}</div> }` → `sqldeep_json_object('card', xml_element('div', name))`
+- JSON object inside XML: `<td>{{name, qty}}</td>` → `xml_element('td', sqldeep_json_object('name', name, 'qty', qty))`
+- JSON path inside XML: `<td>{(data).field}</td>` → `xml_element('td', json_extract(CAST((data) AS TEXT), '$.field'))`
 - Literal brace in XML: `{'{'}` → `'{'`
 - JSON booleans: standalone `true`/`false` in JSON object fields, array elements, and
-  XML attribute/interpolation contexts are auto-wrapped as `json('true')`/`json('false')`
+  XML attribute/interpolation contexts are auto-wrapped as `sqldeep_json('true')`/`sqldeep_json('false')`
   to preserve proper JSON boolean semantics (not integer 1/0).
-- JSONML output: `jsonml(<div class="card">{name}</div>)` → `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name) AS TEXT)` producing `["div",{"class":"card"},"alice"]`. Transpiler macro — emits `_jsonml` variant functions.
+- JSONML output: `jsonml(<div class="card">{name}</div>)` → `xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), name)` producing `["div",{"class":"card"},"alice"]`. Transpiler macro — emits `_jsonml` variant functions.
 - JSONML subquery: `jsonml(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsonml_agg` instead of `xml_agg`
 - JSX output: `jsx(<Graph data={{x, y}} label="Sales"/>)` →
-  `CAST(xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object('x', x, 'y', y), 'label', 'Sales')) AS TEXT)`.
-  Like JSONML but preserves JSON-typed attribute values (subtype 74) as raw JSON
-  in the attributes object instead of stringifying. `xml_attrs_jsx` checks
-  `sqlite3_value_subtype == 74` to detect JSON values.
-  Boolean attributes (`<input disabled/>`) produce `{"disabled":true}` in JSX mode.
+  `xml_element_jsx('Graph/', xml_attrs_jsx('data', sqldeep_json_object('x', x, 'y', y), 'label', 'Sales'))`.
+  Like JSONML but preserves JSON-typed attribute values (BLOB protocol) as raw JSON
+  in the attributes object instead of stringifying. `xml_attrs_jsx` checks BLOB type
+  to detect JSON values. Boolean attributes (`<input disabled/>`) produce `{"disabled":true}` in JSX mode.
 - JSX subquery: `jsx(<ul>{SELECT <li>{name}</li> FROM t}</ul>)` → uses `jsx_agg`
 - `--` line comments stripped
 - `/* ... */` block comments stripped (flat, not nested)
