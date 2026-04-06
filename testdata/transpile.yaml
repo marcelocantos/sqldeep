@@ -32,6 +32,22 @@ convention:
     expected: "SELECT sqldeep_json_object('id', id, 'order_id', oid, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'order_id', oid, 'name', name) FROM t"
 
+  # Qualified bare fields (table.column → key is last component)
+  - name: qualified bare field
+    input: "SELECT { id, sm.repo, sm.topic } FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'repo', sm.repo, 'topic', sm.topic) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('id', id, 'repo', sm.repo, 'topic', sm.topic) FROM t"
+
+  - name: three-part qualified bare field
+    input: "SELECT { s.t.col } FROM t"
+    expected: "SELECT sqldeep_json_object('col', s.t.col) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('col', s.t.col) FROM t"
+
+  - name: qualified bare field with renamed field
+    input: "SELECT { id, sm.repo, label: sm.topic } FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'repo', sm.repo, 'label', sm.topic) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('id', id, 'repo', sm.repo, 'label', sm.topic) FROM t"
+
   # Trailing commas
   - name: trailing comma in object
     input: "SELECT { id, name, } FROM t"

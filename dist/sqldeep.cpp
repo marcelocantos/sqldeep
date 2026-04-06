@@ -303,8 +303,9 @@ using SqlParts = std::vector<SqlPart>;
 struct ObjectLiteral {
     struct Field {
         std::string key;
+        std::string qualified_value; // non-empty = qualified bare field (sm.repo)
         SqlParts computed_key; // non-empty = (expr) computed key
-        SqlParts value; // empty = bare field
+        SqlParts value; // empty = bare field (uses key or qualified_value)
         bool aggregate = false; // SELECT expr (no FROM) → json_group_array(expr)
         bool recursive = false; // * = recurse with same shape
     };
@@ -1349,6 +1350,31 @@ private:
             key = lex_.next();
             if (key.type == TokenType::Ident) {
                 field.key = key.text;
+                // Qualified bare field: sm.repo → key="repo", value="sm.repo"
+                // Look ahead for .ident chains before the colon check.
+                std::string qualified;
+                while (true) {
+                    Token dot = lex_.peek();
+                    if (dot.type != TokenType::Other || dot.text != ".") break;
+                    auto st = lex_.save();
+                    lex_.next(); // consume .
+                    Token next = lex_.peek();
+                    if (next.type != TokenType::Ident) {
+                        lex_.restore(st);
+                        break;
+                    }
+                    lex_.next(); // consume ident
+                    if (qualified.empty()) {
+                        qualified = field.key + "." + next.text;
+                    } else {
+                        qualified += "." + next.text;
+                    }
+                    field.key = next.text; // key is always the last component
+                }
+                if (!qualified.empty()) {
+                    // Stash the full qualified name as the value
+                    field.qualified_value = qualified;
+                }
             } else if (key.type == TokenType::DqString) {
                 // Strip outer quotes and unescape \" → " and \\ → \.
                 auto raw = key.text.substr(1, key.text.size() - 2);
@@ -2075,7 +2101,7 @@ private:
             }
             out += ", ";
             if (f.value.empty()) {
-                out += f.key;
+                out += f.qualified_value.empty() ? f.key : f.qualified_value;
             } else if (f.aggregate) {
                 out += fn_group_array_;
                 out += "(";
@@ -2180,7 +2206,7 @@ private:
             std::string col = f.value.empty() ? f.key : f.key; // column name
             std::string expr;
             if (f.value.empty()) {
-                expr = f.key; // bare field
+                expr = f.qualified_value.empty() ? f.key : f.qualified_value;
             } else {
                 // For renamed fields, the value is the SQL expression
                 std::string val_str;
