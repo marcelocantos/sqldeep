@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.17.0.
+Snapshot as of v0.18.0.
 
 ### C API (`sqldeep.h`)
 
@@ -59,9 +59,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.17.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.18.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `17` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `18` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
@@ -80,6 +80,7 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | Inline array | `[expr, ...]` | **Stable** |
 | Inline object | `{ fields }` | **Stable** |
 | Bare field | `id,` | **Stable** |
+| Qualified bare field | `sm.repo,` → key `repo`, value `sm.repo` | **Experimental** |
 | Renamed field | `order_id: id` | **Stable** |
 | Double-quoted key | `"order id": id` | **Stable** |
 | Computed key | `(expr): value` | **Stable** |

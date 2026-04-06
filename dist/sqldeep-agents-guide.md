@@ -98,6 +98,7 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 | Form | Example | Emits |
 |---|---|---|
 | Bare | `id,` | `'id', id` |
+| Qualified bare | `sm.repo,` | `'repo', sm.repo` |
 | Renamed | `order_id: id` | `'order_id', id` |
 | Quoted key | `"order id": id` | `'order id', id` |
 | Computed key | `(expr): val` | `expr, val` |

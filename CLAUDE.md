@@ -91,6 +91,7 @@ is standard and works unchanged across backends.
 - `[expr, ...]` → `sqldeep_json_array(...)`
 - `{ fields }` → `sqldeep_json_object(...)` (inline)
 - Bare field: `id,` → `'id', id`
+- Qualified bare field: `sm.repo,` → `'repo', sm.repo` (key is last component)
 - Renamed: `order_id: id` → `'order_id', id`
 - Double-quoted key: `"order id": id` → `'order id', id`
 - Computed key: `(expr): val` → `expr, val` (key is a runtime expression)

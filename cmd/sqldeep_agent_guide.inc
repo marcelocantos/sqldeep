@@ -99,6 +99,7 @@ static const char sd_agent_guide[] =
     "| Form | Example | Emits |\n"
     "|---|---|---|\n"
     "| Bare | `id,` | `'id', id` |\n"
+    "| Qualified bare | `sm.repo,` | `'repo', sm.repo` |\n"
     "| Renamed | `order_id: id` | `'order_id', id` |\n"
     "| Quoted key | `\"order id\": id` | `'order id', id` |\n"
     "| Computed key | `(expr): val` | `expr, val` |\n"

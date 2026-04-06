@@ -72,6 +72,7 @@ Three field forms:
 | Form | Example | Output |
 |---|---|---|
 | Bare | `id,` | `'id', id` |
+| Qualified bare | `sm.repo,` | `'repo', sm.repo` |
 | Renamed | `order_id: id,` | `'order_id', id` |
 | Quoted key | `"order id": id,` | `'order id', id` |
 
