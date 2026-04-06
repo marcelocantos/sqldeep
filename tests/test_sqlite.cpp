@@ -22,6 +22,9 @@ struct DbGuard {
     DbGuard() {
         if (sqlite3_open(":memory:", &db) != SQLITE_OK)
             throw std::runtime_error("failed to open :memory: db");
+        // Register custom JSON functions (sqldeep_json_object etc.)
+        // which are now part of the transpiler's SQLite output.
+        sqldeep_register_sqlite_xml(db);
     }
     ~DbGuard() { if (db) sqlite3_close(db); }
     DbGuard(const DbGuard&) = delete;
@@ -1106,15 +1109,15 @@ TEST_CASE("sqlite: xml boolean attribute") {
 TEST_CASE("sqlite: xml dynamic boolean attribute") {
     DbGuardXml g;
 
-    // json('true') → bare attribute name
+    // sqldeep_json('true') → bare attribute name
     auto rows1 = query(g.db,
-        "SELECT CAST(xml_element('input/', xml_attrs('checked', json('true'))) AS TEXT)");
+        "SELECT CAST(xml_element('input/', xml_attrs('checked', sqldeep_json('true'))) AS TEXT)");
     REQUIRE(rows1.size() == 1);
     CHECK(rows1[0] == R"(<input checked/>)");
 
-    // json('false') → attribute omitted
+    // sqldeep_json('false') → attribute omitted
     auto rows2 = query(g.db,
-        "SELECT CAST(xml_element('input/', xml_attrs('checked', json('false'))) AS TEXT)");
+        "SELECT CAST(xml_element('input/', xml_attrs('checked', sqldeep_json('false'))) AS TEXT)");
     REQUIRE(rows2.size() == 1);
     CHECK(rows2[0] == R"(<input/>)");
 
@@ -1311,12 +1314,12 @@ TEST_CASE("sqlite: jsx direct composition") {
     CHECK(result == R"(["div",{"class":"outer"},["span",{"class":"green"},"hello"]])");
 }
 
-TEST_CASE("sqlite: jsx view recomposition with json()") {
+TEST_CASE("sqlite: jsx view recomposition") {
     DbGuardXml g;
     exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
     exec(g.db, "INSERT INTO t VALUES(1, 'hello')");
 
-    // Create view — no CAST, returns TEXT with subtype 74.
+    // Create view — returns BLOB (survives through views).
     char* err_msg = nullptr;
     int err_line = 0, err_col = 0;
     char* create_sql = sqldeep_transpile(
@@ -1326,9 +1329,9 @@ TEST_CASE("sqlite: jsx view recomposition with json()") {
     exec(g.db, create_sql);
     sqldeep_free(create_sql);
 
-    // Subtype 74 doesn't survive SELECT FROM view — re-tag with json().
+    // BLOB survives view — no json() re-tag needed.
     auto result = xml_query(g.db,
-        "SELECT jsx(<div class=\"outer\">{json((SELECT col FROM v_inner))}</div>)");
+        "SELECT jsx(<div class=\"outer\">{(SELECT col FROM v_inner)}</div>)");
     CHECK(result == R"(["div",{"class":"outer"},["span",{"class":"green"},"hello"]])");
 }
 

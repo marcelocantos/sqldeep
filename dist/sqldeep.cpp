@@ -438,8 +438,8 @@ static void xml_dedent(XmlElement& el) {
 }
 
 // In JSON/XML value contexts, wrap a standalone true/false token as
-// json('true')/json('false') so it carries JSON boolean semantics
-// (SQLite subtype 74) rather than collapsing to integer 1/0.
+// sqldeep_json('true')/sqldeep_json('false') so it is returned as a
+// BLOB carrying JSON boolean semantics rather than integer 1/0.
 static void wrap_json_bool(SqlParts& parts) {
     if (parts.size() != 1) return;
     auto* s = std::get_if<std::string>(&parts[0]);
@@ -449,8 +449,8 @@ static void wrap_json_bool(SqlParts& parts) {
     lower.reserve(s->size());
     for (char c : *s)
         lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (lower == "true")       *s = "json('true')";
-    else if (lower == "false") *s = "json('false')";
+    if (lower == "true")       *s = "sqldeep_json('true')";
+    else if (lower == "false") *s = "sqldeep_json('false')";
 }
 
 // ── Parser ──────────────────────────────────────────────────────────
@@ -1524,9 +1524,9 @@ private:
 
             Token eq = lex_.peek();
             if (eq.type != TokenType::Other || eq.text != "=") {
-                // Boolean attribute: emit json('true') so xml_attrs renders bare name
+                // Boolean attribute: emit sqldeep_json('true') so xml_attrs renders bare name
                 SqlParts val;
-                val.push_back(std::string("json('true')"));
+                val.push_back(std::string("sqldeep_json('true')"));
                 el->attrs.push_back({attr_name, std::move(val), false});
                 continue;
             }
@@ -1872,9 +1872,9 @@ private:
             }
             accum += ")";
         } else {
-            accum += "json_extract(";
+            accum += "json_extract(CAST((";
             accum += base;
-            accum += ", '$";
+            accum += ") AS TEXT), '$";
             for (const auto& seg : segs) {
                 if (seg.is_field) {
                     accum += ".";
@@ -1963,22 +1963,21 @@ public:
             fn_group_array_ = "jsonb_agg";
             break;
         default:
-            fn_object_      = "json_object";
-            fn_array_       = "json_array";
-            fn_group_array_ = "json_group_array";
+            fn_object_      = "sqldeep_json_object";
+            fn_array_       = "sqldeep_json_array";
+            fn_group_array_ = "sqldeep_json_group_array";
             break;
         }
     }
 
     std::string render_document(const SqlParts& parts) {
         std::string out;
-        render_parts(parts, out, /*nested=*/false, /*cast_xml=*/true);
+        render_parts(parts, out, /*nested=*/false);
         return out;
     }
 
 private:
-    void render_parts(const SqlParts& parts, std::string& out, bool nested,
-                       bool cast_xml = false) {
+    void render_parts(const SqlParts& parts, std::string& out, bool nested) {
         for (const auto& part : parts) {
             std::visit([&](const auto& v) {
                 using T = std::decay_t<decltype(v)>;
@@ -1995,12 +1994,7 @@ private:
                 } else if constexpr (std::is_same_v<T, std::unique_ptr<RecursiveSelect>>) {
                     render_recursive_select(*v, out);
                 } else if constexpr (std::is_same_v<T, std::unique_ptr<XmlElement>>) {
-                    // CAST only for XML mode (BLOB→TEXT). JSONML/JSX
-                    // return TEXT with JSON subtype — no CAST needed.
-                    bool need_cast = cast_xml && v->mode == XmlMode::Xml;
-                    if (need_cast) out += "CAST(";
                     render_xml_element(*v, out);
-                    if (need_cast) out += " AS TEXT)";
                 }
             }, part);
         }
@@ -2085,10 +2079,12 @@ private:
             } else if (f.aggregate) {
                 out += fn_group_array_;
                 out += "(";
-                render_parts(f.value, out, /*nested=*/true, /*cast_xml=*/true);
+                // No CAST inside custom JSON functions — they handle
+                // BLOBs natively (SQLite) or N/A (PostgreSQL).
+                render_parts(f.value, out, /*nested=*/true);
                 out += ")";
             } else {
-                render_parts(f.value, out, /*nested=*/true, /*cast_xml=*/true);
+                render_parts(f.value, out, /*nested=*/true);
             }
         }
         out += ")";
@@ -2099,7 +2095,7 @@ private:
         out += "(";
         for (size_t i = 0; i < arr.elements.size(); ++i) {
             if (i > 0) out += ", ";
-            render_parts(arr.elements[i], out, /*nested=*/true, /*cast_xml=*/true);
+            render_parts(arr.elements[i], out, /*nested=*/true);
         }
         out += ")";
     }

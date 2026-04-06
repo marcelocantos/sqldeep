@@ -7,97 +7,97 @@ convention:
   # Basic object
   - name: basic object select
     input: "SELECT { id, name } FROM t"
-    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
 
   - name: single bare field
     input: "SELECT { id } FROM t"
-    expected: "SELECT json_object('id', id) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t"
 
   # Renamed / quoted fields
   - name: renamed field
     input: "SELECT { order_id: id } FROM t"
-    expected: "SELECT json_object('order_id', id) FROM t"
+    expected: "SELECT sqldeep_json_object('order_id', id) FROM t"
     expected_postgres: "SELECT jsonb_build_object('order_id', id) FROM t"
 
   - name: double-quoted key
     input: |-
       SELECT { "order id": id } FROM t
-    expected: "SELECT json_object('order id', id) FROM t"
+    expected: "SELECT sqldeep_json_object('order id', id) FROM t"
     expected_postgres: "SELECT jsonb_build_object('order id', id) FROM t"
 
   - name: mixed bare and renamed fields
     input: "SELECT { id, order_id: oid, name } FROM t"
-    expected: "SELECT json_object('id', id, 'order_id', oid, 'name', name) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'order_id', oid, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'order_id', oid, 'name', name) FROM t"
 
   # Trailing commas
   - name: trailing comma in object
     input: "SELECT { id, name, } FROM t"
-    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
 
   - name: trailing comma in array
     input: "SELECT { tags: [1, 2, 3, ] } FROM t"
-    expected: "SELECT json_object('tags', json_array(1, 2, 3)) FROM t"
+    expected: "SELECT sqldeep_json_object('tags', sqldeep_json_array(1, 2, 3)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('tags', jsonb_build_array(1, 2, 3)) FROM t"
 
   # Inline arrays
   - name: inline array
     input: "SELECT { tags: [1, 2, 3] } FROM t"
-    expected: "SELECT json_object('tags', json_array(1, 2, 3)) FROM t"
+    expected: "SELECT sqldeep_json_object('tags', sqldeep_json_array(1, 2, 3)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('tags', jsonb_build_array(1, 2, 3)) FROM t"
 
   - name: inline array with expressions
     input: "SELECT { vals: [a + 1, b * 2] } FROM t"
-    expected: "SELECT json_object('vals', json_array(a + 1, b * 2)) FROM t"
+    expected: "SELECT sqldeep_json_object('vals', sqldeep_json_array(a + 1, b * 2)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('vals', jsonb_build_array(a + 1, b * 2)) FROM t"
 
   # Boolean values in JSON context
   - name: true in object field
     input: "SELECT { active: true } FROM t"
-    expected: "SELECT json_object('active', json('true')) FROM t"
+    expected: "SELECT sqldeep_json_object('active', sqldeep_json('true')) FROM t"
 
   - name: false in object field
     input: "SELECT { active: false } FROM t"
-    expected: "SELECT json_object('active', json('false')) FROM t"
+    expected: "SELECT sqldeep_json_object('active', sqldeep_json('false')) FROM t"
 
   - name: true and false in array
     input: "SELECT { flags: [true, false, 1] } FROM t"
-    expected: "SELECT json_object('flags', json_array(json('true'), json('false'), 1)) FROM t"
+    expected: "SELECT sqldeep_json_object('flags', sqldeep_json_array(sqldeep_json('true'), sqldeep_json('false'), 1)) FROM t"
 
   - name: true in compound expression not wrapped
     input: "SELECT { active: x OR true } FROM t"
-    expected: "SELECT json_object('active', x OR true) FROM t"
+    expected: "SELECT sqldeep_json_object('active', x OR true) FROM t"
 
   # Object/array literals inside function calls (any paren depth)
   - name: object literal inside function call
     input: "SELECT json_group_array({name, value}) FROM t"
-    expected: "SELECT json_group_array(json_object('name', name, 'value', value)) FROM t"
+    expected: "SELECT json_group_array(sqldeep_json_object('name', name, 'value', value)) FROM t"
     expected_postgres: "SELECT json_group_array(jsonb_build_object('name', name, 'value', value)) FROM t"
 
   - name: array literal inside function call
     input: "SELECT json_group_array([a, b]) FROM t"
-    expected: "SELECT json_group_array(json_array(a, b)) FROM t"
+    expected: "SELECT json_group_array(sqldeep_json_array(a, b)) FROM t"
     expected_postgres: "SELECT json_group_array(jsonb_build_array(a, b)) FROM t"
 
   - name: object literal nested in parens
     input: "SELECT coalesce(({name, value}), null) FROM t"
-    expected: "SELECT coalesce((json_object('name', name, 'value', value)), null) FROM t"
+    expected: "SELECT coalesce((sqldeep_json_object('name', name, 'value', value)), null) FROM t"
 
   # Deep constructs at any paren depth
   - name: deep select subquery in function call
     input: "SELECT coalesce((SELECT { id } FROM t), 'none')"
-    expected: "SELECT coalesce((SELECT json_object('id', id) FROM t), 'none')"
+    expected: "SELECT coalesce((SELECT sqldeep_json_object('id', id) FROM t), 'none')"
 
   - name: from-first subquery in function call
     input: "SELECT coalesce((FROM t SELECT { id }), 'none')"
-    expected: "SELECT coalesce((SELECT json_object('id', id) FROM t), 'none')"
+    expected: "SELECT coalesce((SELECT sqldeep_json_object('id', id) FROM t), 'none')"
 
   - name: xml literal in function call
     input: "SELECT upper(<b>{name}</b>) FROM t"
-    expected: "SELECT upper(CAST(xml_element('b', name) AS TEXT)) FROM t"
+    expected: "SELECT upper(xml_element('b', name)) FROM t"
 
   - name: jsx wrapper in function call
     input: "SELECT length(jsx(<div>{x}</div>)) FROM t"
@@ -106,23 +106,23 @@ convention:
   # Expression with commas
   - name: expression with commas in parens
     input: "SELECT { result: coalesce(a, b) } FROM t"
-    expected: "SELECT json_object('result', coalesce(a, b)) FROM t"
+    expected: "SELECT sqldeep_json_object('result', coalesce(a, b)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('result', coalesce(a, b)) FROM t"
 
   - name: nested function calls
     input: "SELECT { v: max(min(a, b), c) } FROM t"
-    expected: "SELECT json_object('v', max(min(a, b), c)) FROM t"
+    expected: "SELECT sqldeep_json_object('v', max(min(a, b), c)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('v', max(min(a, b), c)) FROM t"
 
   # String literals with special chars
   - name: string literal with comma
     input: "SELECT { label: 'a, b' } FROM t"
-    expected: "SELECT json_object('label', 'a, b') FROM t"
+    expected: "SELECT sqldeep_json_object('label', 'a, b') FROM t"
     expected_postgres: "SELECT jsonb_build_object('label', 'a, b') FROM t"
 
   - name: string literal with brace
     input: "SELECT { label: 'hello }' } FROM t"
-    expected: "SELECT json_object('label', 'hello }') FROM t"
+    expected: "SELECT sqldeep_json_object('label', 'hello }') FROM t"
     expected_postgres: "SELECT jsonb_build_object('label', 'hello }') FROM t"
 
   # Comments
@@ -130,19 +130,19 @@ convention:
     input: |-
       -- comment
       SELECT { id } FROM t
-    expected: "SELECT json_object('id', id) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t"
 
   - name: inline comment stripped
     input: |-
       SELECT { id, -- field
       name } FROM t
-    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
 
   - name: block comment stripped
     input: "SELECT { id, /* comment */ name } FROM t"
-    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
 
   - name: multi-line block comment stripped
@@ -151,7 +151,7 @@ convention:
       /* this is a
          multi-line comment */
       name } FROM t
-    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
 
   # SQL passthrough
@@ -169,19 +169,19 @@ convention:
 
   - name: json arrow ->> in WHERE
     input: "SELECT { id } FROM t WHERE data->>'type' = 'x'"
-    expected: "SELECT json_object('id', id) FROM t WHERE data->>'type' = 'x'"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t WHERE data->>'type' = 'x'"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE data->>'type' = 'x'"
 
-  # CREATE VIEW — JSONML/JSX use subtype 74 (no CAST); XML still uses BLOB+CAST
-  - name: create view with jsx no cast
+  # CREATE VIEW — no CAST (BLOBs are valid UTF-8, tools/bindings coerce)
+  - name: create view with jsx
     input: "CREATE VIEW v AS SELECT jsx(<div>{name}</div>) FROM t"
     expected: "CREATE VIEW v AS SELECT xml_element_jsx('div', name) FROM t"
 
-  - name: create view with xml keeps cast
+  - name: create view with xml
     input: "CREATE VIEW v AS SELECT <div>{name}</div> FROM t"
-    expected: "CREATE VIEW v AS SELECT CAST(xml_element('div', name) AS TEXT) FROM t"
+    expected: "CREATE VIEW v AS SELECT xml_element('div', name) FROM t"
 
-  - name: create view with jsonml no cast
+  - name: create view with jsonml
     input: "CREATE VIEW v AS SELECT jsonml(<b>text</b>) FROM t"
     expected: "CREATE VIEW v AS SELECT xml_element_jsonml('b', 'text') FROM t"
 
@@ -204,12 +204,12 @@ convention:
   # Two-level nesting
   - name: two-level object nesting
     input: "SELECT { id, address: SELECT { street, city } FROM addresses WHERE uid = u.id } FROM users u"
-    expected: "SELECT json_object('id', id, 'address', (SELECT json_group_array(json_object('street', street, 'city', city)) FROM addresses WHERE uid = u.id)) FROM users u"
+    expected: "SELECT sqldeep_json_object('id', id, 'address', (SELECT sqldeep_json_group_array(sqldeep_json_object('street', street, 'city', city)) FROM addresses WHERE uid = u.id)) FROM users u"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'address', (SELECT jsonb_agg(jsonb_build_object('street', street, 'city', city)) FROM addresses WHERE uid = u.id)) FROM users u"
 
   - name: two-level nesting with array subquery
     input: "SELECT { id, totals: SELECT [total] FROM orders WHERE cid = c.id } FROM customers c"
-    expected: "SELECT json_object('id', id, 'totals', (SELECT json_group_array(total) FROM orders WHERE cid = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'totals', (SELECT sqldeep_json_group_array(total) FROM orders WHERE cid = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'totals', (SELECT jsonb_agg(total) FROM orders WHERE cid = c.id)) FROM customers c"
 
   # Three-level nesting
@@ -222,7 +222,7 @@ convention:
               items: SELECT { item: 'item-' || name, qty } FROM items i WHERE order_id = o.id,
           } FROM orders o WHERE customer_id = p.id,
       } FROM people p
-    expected: "SELECT json_object('id', id, 'name', name, 'orders', (SELECT json_group_array(json_object('order_id', id, 'items', (SELECT json_group_array(json_object('item', 'item-' || name, 'qty', qty)) FROM items i WHERE order_id = o.id))) FROM orders o WHERE customer_id = p.id)) FROM people p"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('order_id', id, 'items', (SELECT sqldeep_json_group_array(sqldeep_json_object('item', 'item-' || name, 'qty', qty)) FROM items i WHERE order_id = o.id))) FROM orders o WHERE customer_id = p.id)) FROM people p"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name, 'orders', (SELECT jsonb_agg(jsonb_build_object('order_id', id, 'items', (SELECT jsonb_agg(jsonb_build_object('item', 'item-' || name, 'qty', qty)) FROM items i WHERE order_id = o.id))) FROM orders o WHERE customer_id = p.id)) FROM people p"
 
   # Mixed array and object nesting
@@ -236,65 +236,65 @@ convention:
               line_items: SELECT [name] FROM items WHERE oid = o.id,
           } FROM orders o WHERE cid = c.id,
       } FROM customers c
-    expected: "SELECT json_object('id', id, 'tags', json_array(1, 2, 3), 'orders', (SELECT json_group_array(json_object('order_id', id, 'line_items', (SELECT json_group_array(name) FROM items WHERE oid = o.id))) FROM orders o WHERE cid = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'tags', sqldeep_json_array(1, 2, 3), 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('order_id', id, 'line_items', (SELECT sqldeep_json_group_array(name) FROM items WHERE oid = o.id))) FROM orders o WHERE cid = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'tags', jsonb_build_array(1, 2, 3), 'orders', (SELECT jsonb_agg(jsonb_build_object('order_id', id, 'line_items', (SELECT jsonb_agg(name) FROM items WHERE oid = o.id))) FROM orders o WHERE cid = c.id)) FROM customers c"
 
   # Array subquery with expression
   - name: array subquery with expression
     input: "SELECT { ids: SELECT [id * 10] FROM t } FROM u"
-    expected: "SELECT json_object('ids', (SELECT json_group_array(id * 10) FROM t)) FROM u"
+    expected: "SELECT sqldeep_json_object('ids', (SELECT sqldeep_json_group_array(id * 10) FROM t)) FROM u"
     expected_postgres: "SELECT jsonb_build_object('ids', (SELECT jsonb_agg(id * 10) FROM t)) FROM u"
 
   # Deep construct in tail
   - name: deep construct in WHERE subquery
     input: "SELECT { id } FROM t WHERE x IN (SELECT { y } FROM t2)"
-    expected: "SELECT json_object('id', id) FROM t WHERE x IN (SELECT json_group_array(json_object('y', y)) FROM t2)"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t WHERE x IN (SELECT sqldeep_json_group_array(sqldeep_json_object('y', y)) FROM t2)"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE x IN (SELECT jsonb_agg(jsonb_build_object('y', y)) FROM t2)"
 
   # Multiple deep selects
   - name: multiple fields with subqueries
     input: "SELECT { a: SELECT { x } FROM t1, b: SELECT { y } FROM t2 } FROM t"
-    expected: "SELECT json_object('a', (SELECT json_group_array(json_object('x', x)) FROM t1), 'b', (SELECT json_group_array(json_object('y', y)) FROM t2)) FROM t"
+    expected: "SELECT sqldeep_json_object('a', (SELECT sqldeep_json_group_array(sqldeep_json_object('x', x)) FROM t1), 'b', (SELECT sqldeep_json_group_array(sqldeep_json_object('y', y)) FROM t2)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('a', (SELECT jsonb_agg(jsonb_build_object('x', x)) FROM t1), 'b', (SELECT jsonb_agg(jsonb_build_object('y', y)) FROM t2)) FROM t"
 
   # Key escaping
   - name: single-quote in double-quoted key is escaped
     input: |-
       SELECT { "it's": v } FROM t
-    expected: "SELECT json_object('it''s', v) FROM t"
+    expected: "SELECT sqldeep_json_object('it''s', v) FROM t"
     expected_postgres: "SELECT jsonb_build_object('it''s', v) FROM t"
 
   - name: backslash-escaped quote in double-quoted key
     input: |-
       SELECT { "say \"hello\"": v } FROM t
     expected: |-
-      SELECT json_object('say "hello"', v) FROM t
+      SELECT sqldeep_json_object('say "hello"', v) FROM t
     expected_postgres: |-
       SELECT jsonb_build_object('say "hello"', v) FROM t
 
   # SQL doubled-quote strings
   - name: SQL doubled single-quote passthrough
     input: "SELECT { name: 'O''Brien' } FROM t"
-    expected: "SELECT json_object('name', 'O''Brien') FROM t"
+    expected: "SELECT sqldeep_json_object('name', 'O''Brien') FROM t"
     expected_postgres: "SELECT jsonb_build_object('name', 'O''Brien') FROM t"
 
   - name: SQL doubled double-quote in key
     input: |-
       SELECT { "say ""hi""": v } FROM t
     expected: |-
-      SELECT json_object('say "hi"', v) FROM t
+      SELECT sqldeep_json_object('say "hi"', v) FROM t
     expected_postgres: |-
       SELECT jsonb_build_object('say "hi"', v) FROM t
 
   # Auto-join (-> syntax)
   - name: basic auto-join
     input: "SELECT { customers_id, name, orders: SELECT { orders_id } FROM c->orders } FROM customers c"
-    expected: "SELECT json_object('customers_id', customers_id, 'name', name, 'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'name', name, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'name', name, 'orders', (SELECT jsonb_agg(jsonb_build_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id)) FROM customers c"
 
   - name: auto-join with child alias
     input: "SELECT { customers_id, orders: SELECT { orders_id } FROM c->orders o ORDER BY orders_id } FROM customers c"
-    expected: "SELECT json_object('customers_id', customers_id, 'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('orders_id', orders_id)) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'orders', (SELECT jsonb_agg(jsonb_build_object('orders_id', orders_id)) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
 
   - name: three-level auto-join
@@ -306,55 +306,55 @@ convention:
               items: SELECT { items_id, qty } FROM o->items i ORDER BY items_id,
           } FROM c->orders o ORDER BY orders_id,
       } FROM customers c
-    expected: "SELECT json_object('customers_id', customers_id, 'name', name, 'orders', (SELECT json_group_array(json_object('orders_id', orders_id, 'items', (SELECT json_group_array(json_object('items_id', items_id, 'qty', qty)) FROM items i WHERE i.orders_id = o.orders_id ORDER BY items_id))) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'name', name, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('orders_id', orders_id, 'items', (SELECT sqldeep_json_group_array(sqldeep_json_object('items_id', items_id, 'qty', qty)) FROM items i WHERE i.orders_id = o.orders_id ORDER BY items_id))) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'name', name, 'orders', (SELECT jsonb_agg(jsonb_build_object('orders_id', orders_id, 'items', (SELECT jsonb_agg(jsonb_build_object('items_id', items_id, 'qty', qty)) FROM items i WHERE i.orders_id = o.orders_id ORDER BY items_id))) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
 
   - name: auto-join coexists with explicit WHERE
     input: "SELECT { customers_id, orders: SELECT { orders_id } FROM c->orders, notes: SELECT { note } FROM notes WHERE notes.customers_id = c.customers_id } FROM customers c"
-    expected: "SELECT json_object('customers_id', customers_id, 'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id), 'notes', (SELECT json_group_array(json_object('note', note)) FROM notes WHERE notes.customers_id = c.customers_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id), 'notes', (SELECT sqldeep_json_group_array(sqldeep_json_object('note', note)) FROM notes WHERE notes.customers_id = c.customers_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'orders', (SELECT jsonb_agg(jsonb_build_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id), 'notes', (SELECT jsonb_agg(jsonb_build_object('note', note)) FROM notes WHERE notes.customers_id = c.customers_id)) FROM customers c"
 
   # FROM-first syntax
   - name: from-first basic
     input: "FROM t SELECT { id, name }"
-    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
 
   - name: from-first with WHERE
     input: "FROM t WHERE x > 0 SELECT { id }"
-    expected: "SELECT json_object('id', id) FROM t WHERE x > 0"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t WHERE x > 0"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE x > 0"
 
   - name: from-first with ORDER BY
     input: "FROM t ORDER BY id SELECT { id, name }"
-    expected: "SELECT json_object('id', id, 'name', name) FROM t ORDER BY id"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t ORDER BY id"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t ORDER BY id"
 
   - name: from-first with trailing comma
     input: "FROM t SELECT { id, name, }"
-    expected: "SELECT json_object('id', id, 'name', name) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t"
 
   - name: from-first with comment
     input: |-
       -- query
       FROM t SELECT { id }
-    expected: "SELECT json_object('id', id) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t"
 
   - name: from-first array projection
     input: "FROM orders WHERE cid = 1 SELECT [total]"
-    expected: "SELECT json_group_array(total) FROM orders WHERE cid = 1"
+    expected: "SELECT sqldeep_json_group_array(total) FROM orders WHERE cid = 1"
     expected_postgres: "SELECT jsonb_agg(total) FROM orders WHERE cid = 1"
 
   - name: from-first nested in field value
     input: "FROM customers c SELECT { id, name, orders: FROM orders o WHERE o.cid = c.id SELECT { total } }"
-    expected: "SELECT json_object('id', id, 'name', name, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.cid = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.cid = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.cid = c.id)) FROM customers c"
 
   - name: from-first with auto-join
     input: "FROM customers c SELECT { customers_id, name, orders: FROM c->orders SELECT { orders_id } }"
-    expected: "SELECT json_object('customers_id', customers_id, 'name', name, 'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'name', name, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'name', name, 'orders', (SELECT jsonb_agg(jsonb_build_object('orders_id', orders_id)) FROM orders WHERE orders.customers_id = c.customers_id)) FROM customers c"
 
   - name: from-first three-level nesting
@@ -366,27 +366,27 @@ convention:
               items: FROM o->items ORDER BY items_id SELECT { name, qty },
           },
       }
-    expected: "SELECT json_object('customers_id', customers_id, 'name', name, 'orders', (SELECT json_group_array(json_object('orders_id', orders_id, 'items', (SELECT json_group_array(json_object('name', name, 'qty', qty)) FROM items WHERE items.orders_id = o.orders_id ORDER BY items_id))) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'name', name, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('orders_id', orders_id, 'items', (SELECT sqldeep_json_group_array(sqldeep_json_object('name', name, 'qty', qty)) FROM items WHERE items.orders_id = o.orders_id ORDER BY items_id))) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'name', name, 'orders', (SELECT jsonb_agg(jsonb_build_object('orders_id', orders_id, 'items', (SELECT jsonb_agg(jsonb_build_object('name', name, 'qty', qty)) FROM items WHERE items.orders_id = o.orders_id ORDER BY items_id))) FROM orders o WHERE o.customers_id = c.customers_id ORDER BY orders_id)) FROM customers c"
 
   - name: from-first in parenthesised subquery
     input: "SELECT { id } FROM t WHERE x IN (FROM t2 SELECT { y })"
-    expected: "SELECT json_object('id', id) FROM t WHERE x IN (SELECT json_group_array(json_object('y', y)) FROM t2)"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t WHERE x IN (SELECT sqldeep_json_group_array(sqldeep_json_object('y', y)) FROM t2)"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE x IN (SELECT jsonb_agg(jsonb_build_object('y', y)) FROM t2)"
 
   - name: mixed from-first and select-first
     input: "FROM customers c SELECT { id, orders: SELECT { total } FROM orders WHERE cid = c.id }"
-    expected: "SELECT json_object('id', id, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders WHERE cid = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders WHERE cid = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders WHERE cid = c.id)) FROM customers c"
 
   - name: from-first renamed field
     input: "FROM t SELECT { order_id: id }"
-    expected: "SELECT json_object('order_id', id) FROM t"
+    expected: "SELECT sqldeep_json_object('order_id', id) FROM t"
     expected_postgres: "SELECT jsonb_build_object('order_id', id) FROM t"
 
   - name: from-first with inline array
     input: "FROM t SELECT { id, tags: [1, 2, 3] }"
-    expected: "SELECT json_object('id', id, 'tags', json_array(1, 2, 3)) FROM t"
+    expected: "SELECT sqldeep_json_object('id', id, 'tags', sqldeep_json_array(1, 2, 3)) FROM t"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'tags', jsonb_build_array(1, 2, 3)) FROM t"
 
   - name: plain FROM still passes through
@@ -407,7 +407,7 @@ convention:
 
   - name: from-first plain nested as scalar subquery
     input: "SELECT { id, total: FROM orders WHERE cid = c.id SELECT sum(total) } FROM customers c"
-    expected: "SELECT json_object('id', id, 'total', (SELECT sum(total) FROM orders WHERE cid = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'total', (SELECT sum(total) FROM orders WHERE cid = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'total', (SELECT sum(total) FROM orders WHERE cid = c.id)) FROM customers c"
 
   - name: from-first plain in parenthesised subquery
@@ -416,117 +416,117 @@ convention:
 
   - name: from-first plain mixed with deep
     input: "FROM customers c SELECT { id, total: FROM orders WHERE cid = c.id SELECT sum(total) }"
-    expected: "SELECT json_object('id', id, 'total', (SELECT sum(total) FROM orders WHERE cid = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'total', (SELECT sum(total) FROM orders WHERE cid = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'total', (SELECT sum(total) FROM orders WHERE cid = c.id)) FROM customers c"
 
   # Reverse join (<- syntax)
   - name: single reverse join
     input: "SELECT { orders_id, customer: SELECT { name } FROM o<-customers c } FROM orders o"
-    expected: "SELECT json_object('orders_id', orders_id, 'customer', (SELECT json_group_array(json_object('name', name)) FROM customers c WHERE o.customers_id = c.customers_id)) FROM orders o"
+    expected: "SELECT sqldeep_json_object('orders_id', orders_id, 'customer', (SELECT sqldeep_json_group_array(sqldeep_json_object('name', name)) FROM customers c WHERE o.customers_id = c.customers_id)) FROM orders o"
     expected_postgres: "SELECT jsonb_build_object('orders_id', orders_id, 'customer', (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM customers c WHERE o.customers_id = c.customers_id)) FROM orders o"
 
   - name: reverse join without alias
     input: "SELECT { orders_id, customer: SELECT { name } FROM o<-customers } FROM orders o"
-    expected: "SELECT json_object('orders_id', orders_id, 'customer', (SELECT json_group_array(json_object('name', name)) FROM customers WHERE o.customers_id = customers.customers_id)) FROM orders o"
+    expected: "SELECT sqldeep_json_object('orders_id', orders_id, 'customer', (SELECT sqldeep_json_group_array(sqldeep_json_object('name', name)) FROM customers WHERE o.customers_id = customers.customers_id)) FROM orders o"
     expected_postgres: "SELECT jsonb_build_object('orders_id', orders_id, 'customer', (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM customers WHERE o.customers_id = customers.customers_id)) FROM orders o"
 
   # Join path chains
   - name: bridge join (many-to-many)
     input: "SELECT { customers_id, accounts: SELECT { acct_id } FROM c->custacct<-accounts a } FROM customers c"
-    expected: "SELECT json_object('customers_id', customers_id, 'accounts', (SELECT json_group_array(json_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'accounts', (SELECT sqldeep_json_group_array(sqldeep_json_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'accounts', (SELECT jsonb_agg(jsonb_build_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id)) FROM customers c"
 
   - name: bridge join with junction alias
     input: "SELECT { customers_id, accounts: SELECT { acct_id } FROM c->custacct ca<-accounts a } FROM customers c"
-    expected: "SELECT json_object('customers_id', customers_id, 'accounts', (SELECT json_group_array(json_object('acct_id', acct_id)) FROM custacct ca JOIN accounts a ON ca.accounts_id = a.accounts_id WHERE ca.customers_id = c.customers_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'accounts', (SELECT sqldeep_json_group_array(sqldeep_json_object('acct_id', acct_id)) FROM custacct ca JOIN accounts a ON ca.accounts_id = a.accounts_id WHERE ca.customers_id = c.customers_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'accounts', (SELECT jsonb_agg(jsonb_build_object('acct_id', acct_id)) FROM custacct ca JOIN accounts a ON ca.accounts_id = a.accounts_id WHERE ca.customers_id = c.customers_id)) FROM customers c"
 
   - name: bridge join with FROM-first syntax
     input: "FROM customers c SELECT { customers_id, accounts: FROM c->custacct<-accounts a SELECT { acct_id } }"
-    expected: "SELECT json_object('customers_id', customers_id, 'accounts', (SELECT json_group_array(json_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'accounts', (SELECT sqldeep_json_group_array(sqldeep_json_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'accounts', (SELECT jsonb_agg(jsonb_build_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.accounts_id = a.accounts_id WHERE custacct.customers_id = c.customers_id)) FROM customers c"
 
   - name: grandchild chain
     input: "SELECT { customers_id, items: SELECT { items_id } FROM c->orders->items } FROM customers c"
-    expected: "SELECT json_object('customers_id', customers_id, 'items', (SELECT json_group_array(json_object('items_id', items_id)) FROM orders JOIN items ON items.orders_id = orders.orders_id WHERE orders.customers_id = c.customers_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'items', (SELECT sqldeep_json_group_array(sqldeep_json_object('items_id', items_id)) FROM orders JOIN items ON items.orders_id = orders.orders_id WHERE orders.customers_id = c.customers_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'items', (SELECT jsonb_agg(jsonb_build_object('items_id', items_id)) FROM orders JOIN items ON items.orders_id = orders.orders_id WHERE orders.customers_id = c.customers_id)) FROM customers c"
 
   - name: grandchild chain with aliases
     input: "SELECT { customers_id, items: SELECT { items_id } FROM c->orders o->items i } FROM customers c"
-    expected: "SELECT json_object('customers_id', customers_id, 'items', (SELECT json_group_array(json_object('items_id', items_id)) FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'items', (SELECT sqldeep_json_group_array(sqldeep_json_object('items_id', items_id)) FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'items', (SELECT jsonb_agg(jsonb_build_object('items_id', items_id)) FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.customers_id = c.customers_id)) FROM customers c"
 
   - name: three-step chain
     input: "SELECT { a_id, ds: SELECT { d_id } FROM a->b->c->d } FROM alpha a"
-    expected: "SELECT json_object('a_id', a_id, 'ds', (SELECT json_group_array(json_object('d_id', d_id)) FROM b JOIN c ON c.b_id = b.b_id JOIN d ON d.c_id = c.c_id WHERE b.alpha_id = a.alpha_id)) FROM alpha a"
+    expected: "SELECT sqldeep_json_object('a_id', a_id, 'ds', (SELECT sqldeep_json_group_array(sqldeep_json_object('d_id', d_id)) FROM b JOIN c ON c.b_id = b.b_id JOIN d ON d.c_id = c.c_id WHERE b.alpha_id = a.alpha_id)) FROM alpha a"
     expected_postgres: "SELECT jsonb_build_object('a_id', a_id, 'ds', (SELECT jsonb_agg(jsonb_build_object('d_id', d_id)) FROM b JOIN c ON c.b_id = b.b_id JOIN d ON d.c_id = c.c_id WHERE b.alpha_id = a.alpha_id)) FROM alpha a"
 
   # Singular select (SELECT/1)
   - name: singular object select
     input: "SELECT { orders_id, vendor: SELECT/1 { name } FROM o<-vendors v } FROM orders o"
-    expected: "SELECT json_object('orders_id', orders_id, 'vendor', (SELECT json_object('name', name) FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)) FROM orders o"
+    expected: "SELECT sqldeep_json_object('orders_id', orders_id, 'vendor', (SELECT sqldeep_json_object('name', name) FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)) FROM orders o"
     expected_postgres: "SELECT jsonb_build_object('orders_id', orders_id, 'vendor', (SELECT jsonb_build_object('name', name) FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)) FROM orders o"
 
   - name: singular array select single element
     input: "SELECT { id, top: SELECT/1 [score] FROM scores WHERE uid = u.id ORDER BY score DESC } FROM users u"
-    expected: "SELECT json_object('id', id, 'top', (SELECT score FROM scores WHERE uid = u.id ORDER BY score DESC LIMIT 1)) FROM users u"
+    expected: "SELECT sqldeep_json_object('id', id, 'top', (SELECT score FROM scores WHERE uid = u.id ORDER BY score DESC LIMIT 1)) FROM users u"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'top', (SELECT score FROM scores WHERE uid = u.id ORDER BY score DESC LIMIT 1)) FROM users u"
 
   - name: singular array select multi element
     input: "SELECT { id, pair: SELECT/1 [a, b] FROM pairs WHERE uid = u.id } FROM users u"
-    expected: "SELECT json_object('id', id, 'pair', (SELECT json_array(a, b) FROM pairs WHERE uid = u.id LIMIT 1)) FROM users u"
+    expected: "SELECT sqldeep_json_object('id', id, 'pair', (SELECT sqldeep_json_array(a, b) FROM pairs WHERE uid = u.id LIMIT 1)) FROM users u"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'pair', (SELECT jsonb_build_array(a, b) FROM pairs WHERE uid = u.id LIMIT 1)) FROM users u"
 
   - name: singular from-first
     input: "SELECT { orders_id, vendor: FROM o<-vendors v SELECT/1 { name } } FROM orders o"
-    expected: "SELECT json_object('orders_id', orders_id, 'vendor', (SELECT json_object('name', name) FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)) FROM orders o"
+    expected: "SELECT sqldeep_json_object('orders_id', orders_id, 'vendor', (SELECT sqldeep_json_object('name', name) FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)) FROM orders o"
     expected_postgres: "SELECT jsonb_build_object('orders_id', orders_id, 'vendor', (SELECT jsonb_build_object('name', name) FROM vendors v WHERE o.vendors_id = v.vendors_id LIMIT 1)) FROM orders o"
 
   - name: singular top-level
     input: "SELECT/1 { id, name } FROM t"
-    expected: "SELECT json_object('id', id, 'name', name) FROM t LIMIT 1"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM t LIMIT 1"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM t LIMIT 1"
 
   - name: singular in parenthesised subquery
     input: "SELECT { id } FROM t WHERE x = (SELECT/1 { y } FROM t2)"
-    expected: "SELECT json_object('id', id) FROM t WHERE x = (SELECT json_object('y', y) FROM t2 LIMIT 1)"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t WHERE x = (SELECT sqldeep_json_object('y', y) FROM t2 LIMIT 1)"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE x = (SELECT jsonb_build_object('y', y) FROM t2 LIMIT 1)"
 
   # Aggregate field (SELECT expr inside { }, no FROM)
   - name: aggregate field simple
     input: |-
       SELECT { acct_sig, customers: SELECT customer_id } FROM t GROUP BY acct_sig
-    expected: "SELECT json_object('acct_sig', acct_sig, 'customers', json_group_array(customer_id)) FROM t GROUP BY acct_sig"
+    expected: "SELECT sqldeep_json_object('acct_sig', acct_sig, 'customers', sqldeep_json_group_array(customer_id)) FROM t GROUP BY acct_sig"
     expected_postgres: "SELECT jsonb_build_object('acct_sig', acct_sig, 'customers', jsonb_agg(customer_id)) FROM t GROUP BY acct_sig"
 
   - name: aggregate field with expression
     input: |-
       SELECT { key, vals: SELECT a || b } FROM t GROUP BY key
-    expected: "SELECT json_object('key', key, 'vals', json_group_array(a || b)) FROM t GROUP BY key"
+    expected: "SELECT sqldeep_json_object('key', key, 'vals', sqldeep_json_group_array(a || b)) FROM t GROUP BY key"
     expected_postgres: "SELECT jsonb_build_object('key', key, 'vals', jsonb_agg(a || b)) FROM t GROUP BY key"
 
   - name: aggregate field singular skips wrapping
     input: |-
       SELECT { key, val: SELECT/1 x } FROM t GROUP BY key
-    expected: "SELECT json_object('key', key, 'val', x) FROM t GROUP BY key"
+    expected: "SELECT sqldeep_json_object('key', key, 'val', x) FROM t GROUP BY key"
     expected_postgres: "SELECT jsonb_build_object('key', key, 'val', x) FROM t GROUP BY key"
 
   - name: aggregate field multiple in one object
     input: |-
       SELECT { grp, names: SELECT name, ids: SELECT id } FROM t GROUP BY grp
-    expected: "SELECT json_object('grp', grp, 'names', json_group_array(name), 'ids', json_group_array(id)) FROM t GROUP BY grp"
+    expected: "SELECT sqldeep_json_object('grp', grp, 'names', sqldeep_json_group_array(name), 'ids', sqldeep_json_group_array(id)) FROM t GROUP BY grp"
     expected_postgres: "SELECT jsonb_build_object('grp', grp, 'names', jsonb_agg(name), 'ids', jsonb_agg(id)) FROM t GROUP BY grp"
 
   - name: aggregate field with function expression
     input: |-
       SELECT { grp, labels: SELECT upper(name) } FROM t GROUP BY grp
-    expected: "SELECT json_object('grp', grp, 'labels', json_group_array(upper(name))) FROM t GROUP BY grp"
+    expected: "SELECT sqldeep_json_object('grp', grp, 'labels', sqldeep_json_group_array(upper(name))) FROM t GROUP BY grp"
     expected_postgres: "SELECT jsonb_build_object('grp', grp, 'labels', jsonb_agg(upper(name))) FROM t GROUP BY grp"
 
   - name: aggregate field from-first
     input: |-
       FROM t GROUP BY grp SELECT { grp, vals: SELECT x }
-    expected: "SELECT json_object('grp', grp, 'vals', json_group_array(x)) FROM t GROUP BY grp"
+    expected: "SELECT sqldeep_json_object('grp', grp, 'vals', sqldeep_json_group_array(x)) FROM t GROUP BY grp"
     expected_postgres: "SELECT jsonb_build_object('grp', grp, 'vals', jsonb_agg(x)) FROM t GROUP BY grp"
 
   - name: aggregate field mixed with nested subquery
@@ -536,125 +536,125 @@ convention:
           customers: SELECT customer_id,
           orders: SELECT { total } FROM c->orders o,
       } FROM customers c GROUP BY acct_sig
-    expected: "SELECT json_object('acct_sig', acct_sig, 'customers', json_group_array(customer_id), 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.customers_id = c.customers_id)) FROM customers c GROUP BY acct_sig"
+    expected: "SELECT sqldeep_json_object('acct_sig', acct_sig, 'customers', sqldeep_json_group_array(customer_id), 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.customers_id = c.customers_id)) FROM customers c GROUP BY acct_sig"
     expected_postgres: "SELECT jsonb_build_object('acct_sig', acct_sig, 'customers', jsonb_agg(customer_id), 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.customers_id = c.customers_id)) FROM customers c GROUP BY acct_sig"
 
   # Computed keys
   - name: computed key simple
     input: "SELECT { (x): 42 } FROM t"
-    expected: "SELECT json_object(x, 42) FROM t"
+    expected: "SELECT sqldeep_json_object(x, 42) FROM t"
     expected_postgres: "SELECT jsonb_build_object(x, 42) FROM t"
 
   - name: computed key with expression
     input: "SELECT { ('key_' || id): val } FROM t"
-    expected: "SELECT json_object('key_' || id, val) FROM t"
+    expected: "SELECT sqldeep_json_object('key_' || id, val) FROM t"
     expected_postgres: "SELECT jsonb_build_object('key_' || id, val) FROM t"
 
   - name: computed key mixed with static keys
     input: "SELECT { name, (tag): score } FROM t"
-    expected: "SELECT json_object('name', name, tag, score) FROM t"
+    expected: "SELECT sqldeep_json_object('name', name, tag, score) FROM t"
     expected_postgres: "SELECT jsonb_build_object('name', name, tag, score) FROM t"
 
   - name: computed key with function call
     input: "SELECT { (lower(k)): v } FROM t"
-    expected: "SELECT json_object(lower(k), v) FROM t"
+    expected: "SELECT sqldeep_json_object(lower(k), v) FROM t"
     expected_postgres: "SELECT jsonb_build_object(lower(k), v) FROM t"
 
   # ON / USING clauses on join paths
   - name: on shorthand single column
     input: "SELECT { customers_id, orders: SELECT { orders_id } FROM c->orders ON person_id } FROM customers c"
-    expected: "SELECT json_object('customers_id', customers_id, 'orders', (SELECT json_group_array(json_object('orders_id', orders_id)) FROM orders WHERE orders.person_id = c.person_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('customers_id', customers_id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('orders_id', orders_id)) FROM orders WHERE orders.person_id = c.person_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('customers_id', customers_id, 'orders', (SELECT jsonb_agg(jsonb_build_object('orders_id', orders_id)) FROM orders WHERE orders.person_id = c.person_id)) FROM customers c"
 
   - name: on explicit pair
     input: "SELECT { id, orders: SELECT { total } FROM c->orders o ON id = cust_id } FROM customers c"
-    expected: "SELECT json_object('id', id, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
 
   - name: using single column
     input: "SELECT { id, orders: SELECT { total } FROM c->orders o USING (person_id) } FROM customers c"
-    expected: "SELECT json_object('id', id, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.person_id = c.person_id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.person_id = c.person_id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.person_id = c.person_id)) FROM customers c"
 
   - name: on multi-column
     input: "SELECT { id, orders: SELECT { total } FROM c->orders o ON id = cust_id AND region = region } FROM customers c"
-    expected: "SELECT json_object('id', id, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.cust_id = c.id AND o.region = c.region)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.cust_id = c.id AND o.region = c.region)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.cust_id = c.id AND o.region = c.region)) FROM customers c"
 
   - name: using multi-column
     input: "SELECT { id, orders: SELECT { total } FROM c->orders o USING (cust_id, region) } FROM customers c"
-    expected: "SELECT json_object('id', id, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.cust_id = c.cust_id AND o.region = c.region)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.cust_id = c.cust_id AND o.region = c.region)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.cust_id = c.cust_id AND o.region = c.region)) FROM customers c"
 
   - name: on reverse join
     input: "SELECT { orders_id, vendor: SELECT/1 { name } FROM o<-vendors v ON vendor_ref = vid } FROM orders o"
-    expected: "SELECT json_object('orders_id', orders_id, 'vendor', (SELECT json_object('name', name) FROM vendors v WHERE o.vendor_ref = v.vid LIMIT 1)) FROM orders o"
+    expected: "SELECT sqldeep_json_object('orders_id', orders_id, 'vendor', (SELECT sqldeep_json_object('name', name) FROM vendors v WHERE o.vendor_ref = v.vid LIMIT 1)) FROM orders o"
     expected_postgres: "SELECT jsonb_build_object('orders_id', orders_id, 'vendor', (SELECT jsonb_build_object('name', name) FROM vendors v WHERE o.vendor_ref = v.vid LIMIT 1)) FROM orders o"
 
   - name: on in chain
     input: "SELECT { name, items: SELECT { name } FROM c->orders o ON id = cust_id->items i ON oid = order_ref } FROM customers c"
-    expected: "SELECT json_object('name', name, 'items', (SELECT json_group_array(json_object('name', name)) FROM orders o JOIN items i ON i.order_ref = o.oid WHERE o.cust_id = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('name', name, 'items', (SELECT sqldeep_json_group_array(sqldeep_json_object('name', name)) FROM orders o JOIN items i ON i.order_ref = o.oid WHERE o.cust_id = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('name', name, 'items', (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM orders o JOIN items i ON i.order_ref = o.oid WHERE o.cust_id = c.id)) FROM customers c"
 
   - name: on bridge
     input: "SELECT { name, accounts: SELECT { acct_id } FROM c->custacct ON id = cust_id<-accounts a ON acct_id = id } FROM customers c"
-    expected: "SELECT json_object('name', name, 'accounts', (SELECT json_group_array(json_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.acct_id = a.id WHERE custacct.cust_id = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('name', name, 'accounts', (SELECT sqldeep_json_group_array(sqldeep_json_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.acct_id = a.id WHERE custacct.cust_id = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('name', name, 'accounts', (SELECT jsonb_agg(jsonb_build_object('acct_id', acct_id)) FROM custacct JOIN accounts a ON custacct.acct_id = a.id WHERE custacct.cust_id = c.id)) FROM customers c"
 
   - name: on from-first
     input: "FROM customers c SELECT { id, name, orders: FROM c->orders o ON id = cust_id SELECT { total } }"
-    expected: "SELECT json_object('id', id, 'name', name, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
 
   - name: on mixed with convention
     input: "SELECT { name, items: SELECT { name } FROM c->orders o ON id = cust_id->items i } FROM customers c"
-    expected: "SELECT json_object('name', name, 'items', (SELECT json_group_array(json_object('name', name)) FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.cust_id = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('name', name, 'items', (SELECT sqldeep_json_group_array(sqldeep_json_object('name', name)) FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.cust_id = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('name', name, 'items', (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM orders o JOIN items i ON i.orders_id = o.orders_id WHERE o.cust_id = c.id)) FROM customers c"
 
   # JSON path extraction: (expr).field[n]
   - name: json path simple field
     input: "SELECT { name: (data).name } FROM t"
-    expected: "SELECT json_object('name', json_extract(data, '$.name')) FROM t"
+    expected: "SELECT sqldeep_json_object('name', json_extract(CAST((data) AS TEXT), '$.name')) FROM t"
     expected_postgres: "SELECT jsonb_build_object('name', jsonb_extract_path(data, 'name')) FROM t"
 
   - name: json path nested
     input: "SELECT { city: (data).address.city } FROM t"
-    expected: "SELECT json_object('city', json_extract(data, '$.address.city')) FROM t"
+    expected: "SELECT sqldeep_json_object('city', json_extract(CAST((data) AS TEXT), '$.address.city')) FROM t"
     expected_postgres: "SELECT jsonb_build_object('city', jsonb_extract_path(data, 'address', 'city')) FROM t"
 
   - name: json path qualified column
     input: "SELECT { name: (t.data).name } FROM t"
-    expected: "SELECT json_object('name', json_extract(t.data, '$.name')) FROM t"
+    expected: "SELECT sqldeep_json_object('name', json_extract(CAST((t.data) AS TEXT), '$.name')) FROM t"
     expected_postgres: "SELECT jsonb_build_object('name', jsonb_extract_path(t.data, 'name')) FROM t"
 
   - name: json path array index
     input: "SELECT { first: (data).items[0] } FROM t"
-    expected: "SELECT json_object('first', json_extract(data, '$.items[0]')) FROM t"
+    expected: "SELECT sqldeep_json_object('first', json_extract(CAST((data) AS TEXT), '$.items[0]')) FROM t"
     expected_postgres: "SELECT jsonb_build_object('first', jsonb_extract_path(data, 'items', '0')) FROM t"
 
   - name: json path mixed
     input: "SELECT { name: (data).items[2].name } FROM t"
-    expected: "SELECT json_object('name', json_extract(data, '$.items[2].name')) FROM t"
+    expected: "SELECT sqldeep_json_object('name', json_extract(CAST((data) AS TEXT), '$.items[2].name')) FROM t"
     expected_postgres: "SELECT jsonb_build_object('name', jsonb_extract_path(data, 'items', '2', 'name')) FROM t"
 
   - name: json path function base
     input: "SELECT { name: (coalesce(a, b)).name } FROM t"
-    expected: "SELECT json_object('name', json_extract(coalesce(a, b), '$.name')) FROM t"
+    expected: "SELECT sqldeep_json_object('name', json_extract(CAST((coalesce(a, b)) AS TEXT), '$.name')) FROM t"
     expected_postgres: "SELECT jsonb_build_object('name', jsonb_extract_path(coalesce(a, b), 'name')) FROM t"
 
   - name: json path in WHERE
     input: "SELECT * FROM t WHERE (data).type = 'foo'"
-    expected: "SELECT * FROM t WHERE json_extract(data, '$.type') = 'foo'"
+    expected: "SELECT * FROM t WHERE json_extract(CAST((data) AS TEXT), '$.type') = 'foo'"
     expected_postgres: "SELECT * FROM t WHERE jsonb_extract_path(data, 'type') = 'foo'"
 
   - name: json path inside function
     input: "SELECT upper((data).name) FROM t"
-    expected: "SELECT upper(json_extract(data, '$.name')) FROM t"
+    expected: "SELECT upper(json_extract(CAST((data) AS TEXT), '$.name')) FROM t"
     expected_postgres: "SELECT upper(jsonb_extract_path(data, 'name')) FROM t"
 
   - name: json path array index only
     input: "SELECT (data)[0] FROM t"
-    expected: "SELECT json_extract(data, '$[0]') FROM t"
+    expected: "SELECT json_extract(CAST((data) AS TEXT), '$[0]') FROM t"
     expected_postgres: "SELECT jsonb_extract_path(data, '0') FROM t"
 
   - name: json path no transform on plain parens
@@ -671,7 +671,7 @@ convention:
       } FROM categories
         RECURSE ON (parent_id)
         WHERE parent_id IS NULL
-    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
 
   - name: recursive forest (non-singular)
     input: |-
@@ -681,7 +681,7 @@ convention:
       } FROM categories
         RECURSE ON (parent_id)
         WHERE parent_id IS NULL
-    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT '[' || group_concat(_fragment, '') || ']' FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT '[' || group_concat(_fragment, '') || ']' FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
 
   - name: recursive with explicit PK
     input: |-
@@ -691,7 +691,7 @@ convention:
       } FROM nodes
         RECURSE ON (parent_nid = nid)
         WHERE parent_nid IS NULL
-    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_nid, nid, _depth, _path) AS (SELECT id, name, parent_nid, nid, 0, printf('%010d', nid) FROM nodes WHERE parent_nid IS NULL UNION ALL SELECT c.id, c.name, c.parent_nid, c.nid, d._depth + 1, d._path || '/' || printf('%010d', c.nid) FROM nodes c JOIN _sdq_dfs d ON c.parent_nid = d.nid), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_nid ORDER BY nid) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"subs\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_nid, nid, _depth, _path) AS (SELECT id, name, parent_nid, nid, 0, printf('%010d', nid) FROM nodes WHERE parent_nid IS NULL UNION ALL SELECT c.id, c.name, c.parent_nid, c.nid, d._depth + 1, d._path || '/' || printf('%010d', c.nid) FROM nodes c JOIN _sdq_dfs d ON c.parent_nid = d.nid), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_nid ORDER BY nid) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"subs\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
 
   - name: recursive postgres
     input: |-
@@ -701,100 +701,100 @@ convention:
       } FROM categories
         RECURSE ON (parent_id)
         WHERE parent_id IS NULL
-    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
     expected_postgres: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, lpad(CAST(id AS text), 10, '0') FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || lpad(CAST(c.id AS text), 10, '0') FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, jsonb_build_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || chr(127), ']}' FROM _sdq_ranked) SELECT string_agg(_fragment, '' ORDER BY _sort_key) FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
 
 # ── XML literals ────────────────────────────────────────────────────
 
   - name: xml static element
     input: "<div>hello</div>"
-    expected: "CAST(xml_element('div', 'hello') AS TEXT)"
+    expected: "xml_element('div', 'hello')"
 
   - name: xml self-closing element
     input: "<br/>"
-    expected: "CAST(xml_element('br/') AS TEXT)"
+    expected: "xml_element('br/')"
 
   - name: xml empty non-void element
     input: "<div></div>"
-    expected: "CAST(xml_element('div') AS TEXT)"
+    expected: "xml_element('div')"
 
   - name: xml static attribute
     input: '<div class="card">text</div>'
-    expected: "CAST(xml_element('div', xml_attrs('class', 'card'), 'text') AS TEXT)"
+    expected: "xml_element('div', xml_attrs('class', 'card'), 'text')"
 
   - name: xml dynamic attribute
     input: "<span style={style_expr}>text</span>"
-    expected: "CAST(xml_element('span', xml_attrs('style', style_expr), 'text') AS TEXT)"
+    expected: "xml_element('span', xml_attrs('style', style_expr), 'text')"
 
   - name: xml boolean attribute
     input: "<input disabled/>"
-    expected: "CAST(xml_element('input/', xml_attrs('disabled', json('true'))) AS TEXT)"
+    expected: "xml_element('input/', xml_attrs('disabled', sqldeep_json('true')))"
 
   - name: xml dynamic boolean attribute true
     input: "<input checked={true}/>"
-    expected: "CAST(xml_element('input/', xml_attrs('checked', json('true'))) AS TEXT)"
+    expected: "xml_element('input/', xml_attrs('checked', sqldeep_json('true')))"
 
   - name: xml dynamic boolean attribute false
     input: "<input checked={false}/>"
-    expected: "CAST(xml_element('input/', xml_attrs('checked', json('false'))) AS TEXT)"
+    expected: "xml_element('input/', xml_attrs('checked', sqldeep_json('false')))"
 
   - name: xml interpolation true
     input: "<td>{true}</td>"
-    expected: "CAST(xml_element('td', json('true')) AS TEXT)"
+    expected: "xml_element('td', sqldeep_json('true'))"
 
   - name: xml multiple attributes
     input: '<td class="cell" id={cell_id}>val</td>'
-    expected: "CAST(xml_element('td', xml_attrs('class', 'cell', 'id', cell_id), 'val') AS TEXT)"
+    expected: "xml_element('td', xml_attrs('class', 'cell', 'id', cell_id), 'val')"
 
   - name: xml interpolation
     input: "<td>{property_address}</td>"
-    expected: "CAST(xml_element('td', property_address) AS TEXT)"
+    expected: "xml_element('td', property_address)"
 
   - name: xml nested elements
     input: "<div><span>text</span></div>"
-    expected: "CAST(xml_element('div', xml_element('span', 'text')) AS TEXT)"
+    expected: "xml_element('div', xml_element('span', 'text'))"
 
   - name: xml mixed text and interpolation
     input: "<td>Price: {amount}</td>"
-    expected: "CAST(xml_element('td', 'Price: ', amount) AS TEXT)"
+    expected: "xml_element('td', 'Price: ', amount)"
 
   - name: xml nested subquery
     input: |-
       SELECT <ul>{SELECT <li>{name}</li> FROM items}</ul>
-    expected: "SELECT CAST(xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items)) AS TEXT)"
+    expected: "SELECT xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items))"
 
   - name: xml from-first subquery
     input: |-
       SELECT <ul>{FROM items SELECT <li>{name}</li>}</ul>
-    expected: "SELECT CAST(xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items)) AS TEXT)"
+    expected: "SELECT xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items))"
 
   - name: xml self-closing with dynamic attr
     input: "<img src={url}/>"
-    expected: "CAST(xml_element('img/', xml_attrs('src', url)) AS TEXT)"
+    expected: "xml_element('img/', xml_attrs('src', url))"
 
   - name: xml namespaced tag
     input: "<ui:Table.Cell>{value}</ui:Table.Cell>"
-    expected: "CAST(xml_element('ui:Table.Cell', value) AS TEXT)"
+    expected: "xml_element('ui:Table.Cell', value)"
 
   - name: xml inside json
     input: "SELECT { name, card: <div>{name}</div> } FROM items"
-    expected: "SELECT json_object('name', name, 'card', CAST(xml_element('div', name) AS TEXT)) FROM items"
+    expected: "SELECT sqldeep_json_object('name', name, 'card', xml_element('div', name)) FROM items"
 
   - name: xml json object inside interpolation
     input: "<td>{{name, qty}}</td>"
-    expected: "CAST(xml_element('td', json_object('name', name, 'qty', qty)) AS TEXT)"
+    expected: "xml_element('td', sqldeep_json_object('name', name, 'qty', qty))"
 
   - name: xml json path inside interpolation
     input: "<td>{(metadata).address}</td>"
-    expected: "CAST(xml_element('td', json_extract(metadata, '$.address')) AS TEXT)"
+    expected: "xml_element('td', json_extract(CAST((metadata) AS TEXT), '$.address'))"
 
   - name: xml literal brace
     input: "<td>{'{'}text{'}'}</td>"
-    expected: "CAST(xml_element('td', '{', 'text', '}') AS TEXT)"
+    expected: "xml_element('td', '{', 'text', '}')"
 
   - name: xml in select
     input: "SELECT <table><tr><th>Name</th></tr>{SELECT <tr><td>{name}</td></tr> FROM t}</table>"
-    expected: "SELECT CAST(xml_element('table', xml_element('tr', xml_element('th', 'Name')), (SELECT xml_agg(xml_element('tr', xml_element('td', name))) FROM t)) AS TEXT)"
+    expected: "SELECT xml_element('table', xml_element('tr', xml_element('th', 'Name')), (SELECT xml_agg(xml_element('tr', xml_element('td', name))) FROM t))"
 
   - name: xml sql passthrough
     input: "SELECT * FROM t WHERE x < 5"
@@ -802,23 +802,23 @@ convention:
 
   - name: xml with where clause in subquery
     input: "<ul>{SELECT <li>{name}</li> FROM items WHERE active}</ul>"
-    expected: "CAST(xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items WHERE active)) AS TEXT)"
+    expected: "xml_element('ul', (SELECT xml_agg(xml_element('li', name)) FROM items WHERE active))"
 
   - name: xml singular subquery
     input: "<div>{SELECT/1 <span>{name}</span> FROM t}</div>"
-    expected: "CAST(xml_element('div', (SELECT xml_element('span', name) FROM t LIMIT 1)) AS TEXT)"
+    expected: "xml_element('div', (SELECT xml_element('span', name) FROM t LIMIT 1))"
 
   - name: singular select with xml literal
     input: "SELECT/1 <div>{name}</div> FROM t"
-    expected: "SELECT CAST(xml_element('div', name) AS TEXT) FROM t LIMIT 1"
+    expected: "SELECT xml_element('div', name) FROM t LIMIT 1"
 
   - name: xml dedent multi-line
     input: "SELECT <div>\n      <span>text</span>\n    </div>"
-    expected: "SELECT CAST(xml_element('div', '\n  ', xml_element('span', 'text'), '\n') AS TEXT)"
+    expected: "SELECT xml_element('div', '\n  ', xml_element('span', 'text'), '\n')"
 
   - name: xml dedent no newlines unchanged
     input: "<div><span>text</span></div>"
-    expected: "CAST(xml_element('div', xml_element('span', 'text')) AS TEXT)"
+    expected: "xml_element('div', xml_element('span', 'text'))"
 
 # ── JSONML (jsonml) ──────────────────────────────────────────
 
@@ -857,7 +857,7 @@ convention:
 
   - name: jsonml inside json
     input: "SELECT { name, card: jsonml(<div>{name}</div>) } FROM items"
-    expected: "SELECT json_object('name', name, 'card', xml_element_jsonml('div', name)) FROM items"
+    expected: "SELECT sqldeep_json_object('name', name, 'card', xml_element_jsonml('div', name)) FROM items"
 
   - name: jsonml sql passthrough
     input: "SELECT * FROM t WHERE x < 5"
@@ -879,7 +879,7 @@ convention:
 
   - name: jsx boolean attribute
     input: "jsx(<input disabled/>)"
-    expected: "xml_element_jsx('input/', xml_attrs_jsx('disabled', json('true')))"
+    expected: "xml_element_jsx('input/', xml_attrs_jsx('disabled', sqldeep_json('true')))"
 
   - name: jsx nested subquery
     input: |-
@@ -892,7 +892,7 @@ convention:
 
   - name: jsx json object attribute
     input: "jsx(<Graph data={{x, y}}/>)"
-    expected: "xml_element_jsx('Graph/', xml_attrs_jsx('data', json_object('x', x, 'y', y)))"
+    expected: "xml_element_jsx('Graph/', xml_attrs_jsx('data', sqldeep_json_object('x', x, 'y', y)))"
 
 # ── FK-guided join resolution ────────────────────────────────────────
 
@@ -905,7 +905,7 @@ fk:
         columns:
           - from_column: cust_id
             to_column: id
-    expected: "SELECT json_object('id', id, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.cust_id = c.id)) FROM customers c"
 
   - name: fk reverse join
@@ -916,7 +916,7 @@ fk:
         columns:
           - from_column: vendor_ref
             to_column: vid
-    expected: "SELECT json_object('orders_id', orders_id, 'vendor', (SELECT json_object('name', name) FROM vendors v WHERE o.vendor_ref = v.vid LIMIT 1)) FROM orders o"
+    expected: "SELECT sqldeep_json_object('orders_id', orders_id, 'vendor', (SELECT sqldeep_json_object('name', name) FROM vendors v WHERE o.vendor_ref = v.vid LIMIT 1)) FROM orders o"
     expected_postgres: "SELECT jsonb_build_object('orders_id', orders_id, 'vendor', (SELECT jsonb_build_object('name', name) FROM vendors v WHERE o.vendor_ref = v.vid LIMIT 1)) FROM orders o"
 
   - name: fk chain
@@ -932,7 +932,7 @@ fk:
         columns:
           - from_column: order_ref
             to_column: oid
-    expected: "SELECT json_object('name', name, 'items', (SELECT json_group_array(json_object('name', name)) FROM orders o JOIN items i ON i.order_ref = o.oid WHERE o.cust_id = c.id)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('name', name, 'items', (SELECT sqldeep_json_group_array(sqldeep_json_object('name', name)) FROM orders o JOIN items i ON i.order_ref = o.oid WHERE o.cust_id = c.id)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('name', name, 'items', (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM orders o JOIN items i ON i.order_ref = o.oid WHERE o.cust_id = c.id)) FROM customers c"
 
   - name: fk bridge
@@ -948,7 +948,7 @@ fk:
         columns:
           - from_column: cid
             to_column: id
-    expected: "SELECT json_object('name', name, 'courses', (SELECT json_group_array(json_object('title', title)) FROM enrollment JOIN courses co ON enrollment.cid = co.id WHERE enrollment.sid = s.id)) FROM students s"
+    expected: "SELECT sqldeep_json_object('name', name, 'courses', (SELECT sqldeep_json_group_array(sqldeep_json_object('title', title)) FROM enrollment JOIN courses co ON enrollment.cid = co.id WHERE enrollment.sid = s.id)) FROM students s"
     expected_postgres: "SELECT jsonb_build_object('name', name, 'courses', (SELECT jsonb_agg(jsonb_build_object('title', title)) FROM enrollment JOIN courses co ON enrollment.cid = co.id WHERE enrollment.sid = s.id)) FROM students s"
 
   - name: fk multi-column
@@ -961,7 +961,7 @@ fk:
             to_column: id
           - from_column: region
             to_column: region
-    expected: "SELECT json_object('id', id, 'orders', (SELECT json_group_array(json_object('total', total)) FROM orders o WHERE o.cust_id = c.id AND o.region = c.region)) FROM customers c"
+    expected: "SELECT sqldeep_json_object('id', id, 'orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('total', total)) FROM orders o WHERE o.cust_id = c.id AND o.region = c.region)) FROM customers c"
     expected_postgres: "SELECT jsonb_build_object('id', id, 'orders', (SELECT jsonb_agg(jsonb_build_object('total', total)) FROM orders o WHERE o.cust_id = c.id AND o.region = c.region)) FROM customers c"
 
 # ── Convention-based error cases ─────────────────────────────────────
