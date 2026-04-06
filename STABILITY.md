@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.15.0.
+Snapshot as of v0.16.0.
 
 ### C API (`sqldeep.h`)
 
@@ -53,9 +53,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.15.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.16.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `15` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `16` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Input syntax (DSL)
@@ -144,14 +144,12 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | JSON boolean wrapping | Standalone `true`/`false` → `json('true')`/`json('false')` | **Experimental** |
 | Boolean attrs (XML) | `json('true')` → bare attr; `json('false')` → omit | **Experimental** |
 | Boolean attrs (JSX) | `json('true')` → `true` in attrs object | **Experimental** |
-| JSONML element (top-level) | `CAST(xml_element_jsonml(...) AS TEXT)` | **Experimental** |
-| JSONML element (nested) | `xml_element_jsonml(...)` (BLOB consumed by parent) | **Experimental** |
-| JSONML attrs | `xml_attrs_jsonml(...)` → `{"k":"v",...}` BLOB | **Experimental** |
-| JSONML subquery aggregation | `jsonml_agg(xml_element_jsonml(...))` | **Experimental** |
-| JSX element (top-level) | `CAST(xml_element_jsx(...) AS TEXT)` | **Experimental** |
-| JSX element (nested) | `xml_element_jsx(...)` (aliases `xml_element_jsonml`) | **Experimental** |
+| JSONML element | `xml_element_jsonml(...)` → TEXT with subtype 74 (no CAST) | **Experimental** |
+| JSONML attrs | `xml_attrs_jsonml(...)` → `{"k":"v",...}` TEXT with subtype 74 | **Experimental** |
+| JSONML subquery aggregation | `jsonml_agg(...)` → TEXT with subtype 74 | **Experimental** |
+| JSX element | `xml_element_jsx(...)` → TEXT with subtype 74 (no CAST) | **Experimental** |
 | JSX attrs | `xml_attrs_jsx(...)` → preserves subtype-74 values as raw JSON | **Experimental** |
-| JSX subquery aggregation | `jsx_agg(...)` (aliases `jsonml_agg`) | **Experimental** |
+| JSX subquery aggregation | `jsx_agg(...)` → TEXT with subtype 74 | **Experimental** |
 
 ### Parser behaviour
 

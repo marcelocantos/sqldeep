@@ -84,3 +84,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `e193771`
 - **Outcome**: Released v0.15.0 (darwin-arm64, linux-amd64, linux-arm64). Removed all paren-depth restrictions — deep selects, FROM-first, join paths, XML literals, and SELECT/1 now work at any depth. Per-scope FROM context tracking prevents join arrow leakage across paren boundaries. 435 assertions pass (82 test cases).
+
+## 2026-04-06 — /release v0.16.0
+
+- **Commit**: `3f94819`
+- **Outcome**: Released v0.16.0 (darwin-arm64, linux-amd64, linux-arm64). JSONML/JSX functions switched from BLOB protocol to TEXT with JSON subtype 74 — no CAST needed, views composable, json_object preserves inline JSON. XML mode retains BLOB+CAST. SQLITE_SUBTYPE flag on all subtype-aware functions. 441 assertions pass (84 test cases).
