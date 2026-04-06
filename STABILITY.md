@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.14.0.
+Snapshot as of v0.15.0.
 
 ### C API (`sqldeep.h`)
 
@@ -193,6 +193,12 @@ The following were evaluated during the pre-1.0 period and are now settled:
   SQLite's `->` and `->>` JSON extraction operators. Previously, `->` after
   any identifier at paren depth 0 was treated as a join arrow, which prevented
   use of SQL JSON operators in SELECT, WHERE, and other non-FROM contexts.
+- **Uniform paren-depth semantics** (v0.15.0): All deep constructs (deep
+  selects, FROM-first, join paths, XML literals, `SELECT/1`) now work at
+  any parenthesis depth. Per-scope FROM context tracking (`in_from_context`
+  saved/restored on `(`/`)`) prevents context leakage across paren boundaries.
+  `<ident` is recognised as XML at any depth — `<` cannot start a SQL
+  expression, so the ambiguity with less-than doesn't apply.
 
 ## Gaps and prerequisites
 
