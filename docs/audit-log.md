@@ -79,3 +79,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `d8fd878`
 - **Outcome**: Released v0.14.0 (darwin-arm64, linux-amd64, linux-arm64). Added `jsx()` and `jsonml()` output modes (replacing `xml_to_jsonml()`), JSON boolean auto-wrapping (`true`/`false` → `json('true')`/`json('false')`), boolean attribute semantics via subtype 74, object/array literals at any paren depth, `--help-agent` CLI flag. Added release CI workflow with Homebrew tap integration. 422 assertions pass (79 test cases).
+
+## 2026-04-06 — /release v0.15.0
+
+- **Commit**: `e193771`
+- **Outcome**: Released v0.15.0 (darwin-arm64, linux-amd64, linux-arm64). Removed all paren-depth restrictions — deep selects, FROM-first, join paths, XML literals, and SELECT/1 now work at any depth. Per-scope FROM context tracking prevents join arrow leakage across paren boundaries. 435 assertions pass (82 test cases).
