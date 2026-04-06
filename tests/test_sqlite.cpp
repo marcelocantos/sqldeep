@@ -1298,4 +1298,26 @@ TEST_CASE("sqlite: jsx subquery aggregation") {
     CHECK(result == R"(["ul",["li","apple"],["li","banana"]])");
 }
 
+TEST_CASE("sqlite: jsx view recomposition") {
+    DbGuardXml g;
+    exec(g.db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES(1, 'hello')");
+
+    // Create view using transpiled JSX — should NOT have CAST(... AS TEXT)
+    // so the BLOB type is preserved for recomposition.
+    char* err_msg = nullptr;
+    int err_line = 0, err_col = 0;
+    char* create_sql = sqldeep_transpile(
+        "CREATE VIEW v_inner AS SELECT jsx(<span class=\"green\">{name}</span>) FROM t",
+        &err_msg, &err_line, &err_col);
+    REQUIRE(create_sql);
+    exec(g.db, create_sql);
+    sqldeep_free(create_sql);
+
+    // Nest the view inside an outer JSX expression.
+    // The inner BLOB should be spliced as a subtree, not double-encoded.
+    auto result = xml_query(g.db,
+        "SELECT jsx(<div class=\"outer\">{(SELECT * FROM v_inner)}</div>)");
+    CHECK(result == R"(["div",{"class":"outer"},["span",{"class":"green"},"hello"]])");
+}
 

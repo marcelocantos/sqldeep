@@ -172,6 +172,23 @@ convention:
     expected: "SELECT json_object('id', id) FROM t WHERE data->>'type' = 'x'"
     expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE data->>'type' = 'x'"
 
+  # CREATE VIEW — no CAST(... AS TEXT) for XML/JSX/JSONML (preserves BLOB for recomposition)
+  - name: create view with jsx suppresses cast
+    input: "CREATE VIEW v AS SELECT jsx(<div>{name}</div>) FROM t"
+    expected: "CREATE VIEW v AS SELECT xml_element_jsx('div', name) FROM t"
+
+  - name: create view with xml suppresses cast
+    input: "CREATE VIEW v AS SELECT <div>{name}</div> FROM t"
+    expected: "CREATE VIEW v AS SELECT xml_element('div', name) FROM t"
+
+  - name: create view with jsonml suppresses cast
+    input: "CREATE VIEW v AS SELECT jsonml(<b>text</b>) FROM t"
+    expected: "CREATE VIEW v AS SELECT xml_element_jsonml('b', 'text') FROM t"
+
+  - name: create temp view suppresses cast
+    input: "CREATE TEMPORARY VIEW v AS SELECT jsx(<span/>)"
+    expected: "CREATE TEMPORARY VIEW v AS SELECT xml_element_jsx('span/')"
+
   - name: number with trailing dot not absorbed
     input: "SELECT 1.0 + 2 FROM t"
     expected: "SELECT 1.0 + 2 FROM t"
