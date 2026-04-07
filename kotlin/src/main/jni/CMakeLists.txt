@@ -23,6 +23,8 @@ target_include_directories(sqldeep PRIVATE
     ${SQLDEEP_ROOT}/vendor/include
 )
 
-# SQLite needs pthreads and dl on Android/Linux.
+# Android log library (not available on desktop — conditional).
 find_library(log-lib log)
-target_link_libraries(sqldeep ${log-lib})
+if(log-lib)
+    target_link_libraries(sqldeep ${log-lib})
+endif()
