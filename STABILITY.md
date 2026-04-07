@@ -59,9 +59,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.19.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.20.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `19` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `20` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Go API (`go/sqldeep`)
