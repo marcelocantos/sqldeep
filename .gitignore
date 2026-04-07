@@ -12,3 +12,10 @@ build/
 compile_commands.json
 *.db
 swift/.build/
+kotlin/local.properties
+kotlin/.gradle/
+kotlin/.cxx/
+kotlin/build/
+kotlin/gradlew
+kotlin/gradlew.bat
+kotlin/gradle/

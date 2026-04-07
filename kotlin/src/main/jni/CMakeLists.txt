@@ -1,12 +1,21 @@
+# Copyright 2026 Marcelo Cantos
+# SPDX-License-Identifier: Apache-2.0
+
 cmake_minimum_required(VERSION 3.18)
-project(sqldeep C)
+project(sqldeep C CXX)
 
 # Paths relative to the repo root
 set(SQLDEEP_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../..)
 
+# C++20 for sqldeep.cpp
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 add_library(sqldeep SHARED
     sqldeep_jni.c
     ${SQLDEEP_ROOT}/dist/sqldeep_xml.c
+    ${SQLDEEP_ROOT}/dist/sqldeep.cpp
+    ${SQLDEEP_ROOT}/vendor/src/sqlite3.c
 )
 
 target_include_directories(sqldeep PRIVATE
@@ -14,7 +23,6 @@ target_include_directories(sqldeep PRIVATE
     ${SQLDEEP_ROOT}/vendor/include
 )
 
-# Link against the system SQLite (Android provides it), or against a
-# vendored copy if building a custom SQLite (e.g., requery/sqlite-android).
-# Uncomment the next line if using the repo's vendored sqlite3.c:
-# target_sources(sqldeep PRIVATE ${SQLDEEP_ROOT}/vendor/src/sqlite3.c)
+# SQLite needs pthreads and dl on Android/Linux.
+find_library(log-lib log)
+target_link_libraries(sqldeep ${log-lib})
