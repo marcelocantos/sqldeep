@@ -1,36 +1,51 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 //
-// Smoke tests: transpile sqldeep syntax, execute against a real SQLite
-// database via go-sqlite3, and verify the output. These tests exercise
-// the sqlite3_auto_extension registration — importing this package
-// should make all sqldeep functions available on every connection.
+// Data-driven SQLite integration tests: load test cases from
+// testdata/sqlite.yaml, transpile, execute, and verify.
 
 package sqldeep
 
 import (
 	"database/sql"
+	"os"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
+	"gopkg.in/yaml.v3"
 )
 
-// query transpiles the input, executes it against db, and returns the
-// single-column result from the first row.
-func query(t *testing.T, db *sql.DB, input string) string {
-	t.Helper()
-	sql, err := Transpile(input)
-	if err != nil {
-		t.Fatalf("Transpile(%q): %v", input, err)
-	}
-	var result string
-	if err := db.QueryRow(sql).Scan(&result); err != nil {
-		t.Fatalf("QueryRow(%q): %v\nSQL: %s", input, err, sql)
-	}
-	return result
+type sqliteTestCase struct {
+	Name             string         `yaml:"name"`
+	Setup            []string       `yaml:"setup"`
+	Input            string         `yaml:"input"`
+	RawSQL           string         `yaml:"raw_sql"`
+	Expected         []string       `yaml:"expected"`
+	ExpectedContains []string       `yaml:"expected_contains"`
+	FKs              []yamlFK       `yaml:"fks"`
+	Steps            []sqliteStep   `yaml:"steps"`
 }
 
-func openDB(t *testing.T) *sql.DB {
+type sqliteStep struct {
+	TranspileExec  string `yaml:"transpile_exec"`
+	TranspileQuery string `yaml:"transpile_query"`
+}
+
+func loadSQLiteTests(t *testing.T) []sqliteTestCase {
+	t.Helper()
+	data, err := os.ReadFile("../../testdata/sqlite.yaml")
+	if err != nil {
+		t.Fatalf("reading sqlite.yaml: %v", err)
+	}
+	var tests []sqliteTestCase
+	if err := yaml.Unmarshal(data, &tests); err != nil {
+		t.Fatalf("parsing sqlite.yaml: %v", err)
+	}
+	return tests
+}
+
+func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -40,147 +55,118 @@ func openDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func exec(t *testing.T, db *sql.DB, sql string) {
+func execSQL(t *testing.T, db *sql.DB, sql string) {
 	t.Helper()
 	if _, err := db.Exec(sql); err != nil {
-		t.Fatalf("Exec(%q): %v", sql, err)
+		t.Fatalf("Exec: %v\nSQL: %s", err, sql)
 	}
 }
 
-func TestSmoke_BasicObject(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(id INTEGER, name TEXT)")
-	exec(t, db, "INSERT INTO t VALUES(1, 'alice')")
-
-	got := query(t, db, "SELECT { id, name } FROM t")
-	want := `{"id":1,"name":"alice"}`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestSmoke_NestedSubquery(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE customers(customers_id INTEGER, name TEXT)")
-	exec(t, db, "CREATE TABLE orders(orders_id INTEGER, customers_id INTEGER, total REAL)")
-	exec(t, db, "INSERT INTO customers VALUES(1, 'alice')")
-	exec(t, db, "INSERT INTO orders VALUES(10, 1, 99.50)")
-	exec(t, db, "INSERT INTO orders VALUES(11, 1, 42.00)")
-
-	got := query(t, db, `
-		SELECT { customers_id, name,
-			orders: SELECT { orders_id, total }
-				FROM orders WHERE customers_id = c.customers_id
-				ORDER BY orders_id,
-		} FROM customers c`)
-	want := `{"customers_id":1,"name":"alice","orders":[{"orders_id":10,"total":99.5},{"orders_id":11,"total":42.0}]}`
-	if got != want {
-		t.Errorf("got  %q\nwant %q", got, want)
-	}
-}
-
-func TestSmoke_InlineArray(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(id INTEGER)")
-	exec(t, db, "INSERT INTO t VALUES(1)")
-
-	got := query(t, db, "SELECT { id, tags: [10, 20, 30] } FROM t")
-	want := `{"id":1,"tags":[10,20,30]}`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestSmoke_SingularSelect(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(id INTEGER, name TEXT)")
-	exec(t, db, "INSERT INTO t VALUES(1, 'alice')")
-
-	got := query(t, db, "SELECT/1 { id, name } FROM t")
-	want := `{"id":1,"name":"alice"}`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestSmoke_QualifiedBareField(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(id INTEGER)")
-	exec(t, db, "CREATE TABLE s(id INTEGER, repo TEXT)")
-	exec(t, db, "INSERT INTO t VALUES(1)")
-	exec(t, db, "INSERT INTO s VALUES(1, 'sqldeep')")
-
-	got := query(t, db, "SELECT { t.id, s.repo } FROM t JOIN s ON s.id = t.id")
-	want := `{"id":1,"repo":"sqldeep"}`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestSmoke_JsonBoolean(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(id INTEGER)")
-	exec(t, db, "INSERT INTO t VALUES(1)")
-
-	got := query(t, db, "SELECT { id, active: true } FROM t")
-	want := `{"id":1,"active":true}`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestSmoke_XMLElement(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(name TEXT)")
-	exec(t, db, "INSERT INTO t VALUES('alice')")
-
-	got := query(t, db, `SELECT <div class="card">{name}</div> FROM t`)
-	want := `<div class="card">alice</div>`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestSmoke_JSONML(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(name TEXT)")
-	exec(t, db, "INSERT INTO t VALUES('alice')")
-
-	got := query(t, db, `SELECT jsonml(<span>{name}</span>) FROM t`)
-	want := `["span","alice"]`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestSmoke_JSX(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(x INTEGER, y INTEGER)")
-	exec(t, db, "INSERT INTO t VALUES(10, 20)")
-
-	got := query(t, db, `SELECT jsx(<Point data={{x, y}}/>) FROM t`)
-	want := `["Point",{"data":{"x":10,"y":20}}]`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestSmoke_ViewRecomposition(t *testing.T) {
-	db := openDB(t)
-	exec(t, db, "CREATE TABLE t(id INTEGER, name TEXT)")
-	exec(t, db, "INSERT INTO t VALUES(1, 'alice')")
-
-	// Create view with JSONML — BLOB survives the view.
-	createSQL, err := Transpile(`CREATE VIEW v AS SELECT jsonml(<b>{name}</b>) AS col FROM t`)
+func queryRows(t *testing.T, db *sql.DB, sqlStr string) []string {
+	t.Helper()
+	rows, err := db.Query(sqlStr)
 	if err != nil {
-		t.Fatalf("Transpile CREATE VIEW: %v", err)
+		t.Fatalf("Query: %v\nSQL: %s", err, sqlStr)
 	}
-	exec(t, db, createSQL)
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("Columns: %v", err)
+	}
+	var results []string
+	for rows.Next() {
+		// Scan all columns, return only the first (matches C++ behavior).
+		vals := make([]sql.NullString, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if vals[0].Valid {
+			results = append(results, vals[0].String)
+		} else {
+			results = append(results, "NULL")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return results
+}
 
-	// Query the view — BLOB is consumed by outer JSONML element.
-	got := query(t, db, `SELECT jsonml(<div>{(SELECT col FROM v)}</div>)`)
-	want := `["div",["b","alice"]]`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
+func TestSQLiteIntegration(t *testing.T) {
+	tests := loadSQLiteTests(t)
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			db := openTestDB(t)
+
+			// Setup
+			for _, sql := range tc.Setup {
+				execSQL(t, db, sql)
+			}
+
+			var rows []string
+
+			switch {
+			case len(tc.Steps) > 0:
+				// Multi-step (view recomposition etc.)
+				for _, step := range tc.Steps {
+					if step.TranspileExec != "" {
+						sql, err := Transpile(step.TranspileExec)
+						if err != nil {
+							t.Fatalf("Transpile exec: %v", err)
+						}
+						execSQL(t, db, sql)
+					}
+					if step.TranspileQuery != "" {
+						sql, err := Transpile(step.TranspileQuery)
+						if err != nil {
+							t.Fatalf("Transpile query: %v", err)
+						}
+						rows = queryRows(t, db, sql)
+					}
+				}
+
+			case tc.RawSQL != "":
+				rows = queryRows(t, db, tc.RawSQL)
+
+			case len(tc.FKs) > 0:
+				sql, err := TranspileFK(tc.Input, toFKs(tc.FKs))
+				if err != nil {
+					t.Fatalf("TranspileFK: %v", err)
+				}
+				rows = queryRows(t, db, sql)
+
+			default:
+				sql, err := Transpile(tc.Input)
+				if err != nil {
+					t.Fatalf("Transpile: %v", err)
+				}
+				rows = queryRows(t, db, sql)
+			}
+
+			// Verify
+			if len(tc.ExpectedContains) > 0 {
+				if len(rows) != 1 {
+					t.Fatalf("expected 1 row, got %d", len(rows))
+				}
+				for _, needle := range tc.ExpectedContains {
+					if !strings.Contains(rows[0], needle) {
+						t.Errorf("missing %q in %q", needle, rows[0])
+					}
+				}
+			} else {
+				if len(rows) != len(tc.Expected) {
+					t.Fatalf("row count: got %d, want %d", len(rows), len(tc.Expected))
+				}
+				for i, want := range tc.Expected {
+					if rows[i] != want {
+						t.Errorf("row[%d]:\n got = %q\nwant = %q", i, rows[i], want)
+					}
+				}
+			}
+		})
 	}
 }

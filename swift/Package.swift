@@ -9,7 +9,14 @@ let package = Package(
     products: [
         .library(name: "SQLDeepRuntime", targets: ["SQLDeepRuntime"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.0.0"),
+    ],
     targets: [
         .target(name: "SQLDeepRuntime"),
+        .testTarget(
+            name: "SQLDeepRuntimeTests",
+            dependencies: ["SQLDeepRuntime", "Yams"]
+        ),
     ]
 )
