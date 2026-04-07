@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.19.0.
+Snapshot as of v0.20.0.
 
 ### C API (`sqldeep.h`)
 
@@ -77,6 +77,35 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | `RegisterSQLite` | `func RegisterSQLite(db unsafe.Pointer) error` | **Experimental** |
 | `Version` | `func Version() string` | **Stable** |
 | Auto-extension | `init()` calls `sqlite3_auto_extension` — all connections get sqldeep functions | **Experimental** |
+
+### Swift API (`swift/Sources/SQLDeepRuntime`)
+
+| Item | Signature | Stability |
+|------|-----------|-----------|
+| `sqldeepTranspile` | `func sqldeepTranspile(_ input: String) throws -> String` | **Experimental** |
+| `sqldeepTranspileFK` | `func sqldeepTranspileFK(_ input: String, foreignKeys: [SQLDeepForeignKey]) throws -> String` | **Experimental** |
+| `sqldeepRegisterSQLite` | `func sqldeepRegisterSQLite(_ db: OpaquePointer) -> Int32` | **Experimental** |
+| `SQLDeepError` | `struct { message: String, line: Int, column: Int }` | **Experimental** |
+| `SQLDeepForeignKey` | `struct { fromTable, toTable, columns: [SQLDeepColumnPair] }` | **Experimental** |
+| `SQLDeepColumnPair` | `struct { fromColumn, toColumn }` | **Experimental** |
+
+Pure Swift port of all SQLite runtime functions (JSON, XML, JSONML, JSX).
+Wraps the C transpiler API via a `CSQLDeep` clang module.
+
+### Kotlin API (`kotlin/src/main/kotlin/com/marcelocantos/sqldeep`)
+
+| Item | Signature | Stability |
+|------|-----------|-----------|
+| `SQLDeep.transpile` | `fun transpile(input: String): String` | **Experimental** |
+| `SQLDeep.transpileFK` | `fun transpileFK(input: String, foreignKeys: List<ForeignKey>): String` | **Experimental** |
+| `SQLDeep.version` | `fun version(): String` | **Experimental** |
+| `SQLDeep.TranspileException` | `class TranspileException(msg, line, col)` | **Experimental** |
+| `SQLDeepRuntime.register` | `fun register(dbHandle: Long): Int` | **Experimental** |
+| `ForeignKey` | `data class ForeignKey(fromTable, toTable, columns: List<ColumnPair>)` | **Experimental** |
+| `ColumnPair` | `data class ColumnPair(fromColumn, toColumn)` | **Experimental** |
+
+JNI bridge to the C transpiler. Pure Kotlin port of all SQLite runtime functions.
+Native code built via CMake (C++20). Works on Android and JVM desktop.
 
 ### Input syntax (DSL)
 
@@ -273,6 +302,20 @@ Before 1.0:
   `json('true')`/`json('false')` to `sqldeep_json('true')`/`sqldeep_json('false')`
   to return BLOB instead of TEXT. Only applies to single-token values, not
   compound expressions.
+- **Swift binding settling**: New in v0.20.0. Pure Swift port of all runtime
+  functions plus `CSQLDeep` transpiler wrapper. API mirrors the C and Go bindings.
+  Tested on macOS (SPM) and iOS Simulator. Needs real-world usage to confirm API
+  ergonomics and that the BLOB protocol works correctly through Swift's `Data`/
+  `sqlite3_result_blob` path.
+- **Kotlin/Android binding settling**: New in v0.20.0. JNI bridge to the C
+  transpiler plus pure Kotlin port of all runtime functions. Tested on Android
+  device/emulator and JVM desktop. Needs real-world usage to confirm JNI
+  marshaling is correct for all edge cases (multi-column FKs, large inputs,
+  error paths).
+- **Shared test architecture settling**: New in v0.20.0. `testdata/sqlite.yaml`
+  (79 cases) shared across C++, Go, Swift, and Kotlin. Adding a test case to
+  the YAML file exercises all bindings automatically. Needs confirmation that
+  the YAML schema covers all necessary test patterns.
 - **Custom JSON functions settling**: New in v0.17.0. `sqldeep_json_object`,
   `sqldeep_json_array`, `sqldeep_json_group_array`, and `sqldeep_json` replace
   the built-in SQLite `json_object`/`json_array`/`json_group_array`/`json` calls
