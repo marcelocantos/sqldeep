@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 //
-// Data-driven SQLite integration tests for the Swift runtime.
+// Data-driven SQLite integration tests for the Swift runtime + transpiler.
 
 import XCTest
 import SQLDeepRuntime
@@ -72,7 +72,14 @@ func queryRows(_ db: OpaquePointer, _ sql: String) throws -> [String] {
 
     var rows: [String] = []
     while sqlite3_step(stmt) == SQLITE_ROW {
-        if let text = sqlite3_column_text(stmt, 0) {
+        if sqlite3_column_type(stmt, 0) == SQLITE_BLOB {
+            let n = sqlite3_column_bytes(stmt, 0)
+            if n > 0, let p = sqlite3_column_blob(stmt, 0) {
+                rows.append(String(data: Data(bytes: p, count: Int(n)), encoding: .utf8) ?? "")
+            } else {
+                rows.append("")
+            }
+        } else if let text = sqlite3_column_text(stmt, 0) {
             rows.append(String(cString: text))
         } else {
             rows.append("NULL")
@@ -81,49 +88,96 @@ func queryRows(_ db: OpaquePointer, _ sql: String) throws -> [String] {
     return rows
 }
 
-// MARK: - Transpile helper (calls the C API)
-// The Swift runtime doesn't include the transpiler — it only has the
-// SQLite functions. For now, skip tests that require transpilation
-// (they test the transpiler + runtime together). The Swift tests focus
-// on the runtime functions via raw_sql tests.
-//
-// TODO: Add C transpiler binding to Swift package, or extract runtime-only
-// tests into a separate YAML section.
+// MARK: - Transpile + execute helpers
+
+func transpile(_ input: String, fks: [FKDef]?) throws -> String {
+    if let fks, !fks.isEmpty {
+        let swiftFKs = fks.map { fk in
+            SQLDeepForeignKey(
+                fromTable: fk.from_table,
+                toTable: fk.to_table,
+                columns: fk.columns.map {
+                    SQLDeepColumnPair(fromColumn: $0.from_column, toColumn: $0.to_column)
+                }
+            )
+        }
+        return try sqldeepTranspileFK(input, foreignKeys: swiftFKs)
+    }
+    return try sqldeepTranspile(input)
+}
 
 // MARK: - Tests
 
 final class SQLiteIntegrationTests: XCTestCase {
-    func testRuntimeFunctions() throws {
-        // Load test data
-        // Load from symlinked file in the test directory.
+    func testAllCases() throws {
+        // Load test data from symlinked file in the test directory.
         let testDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let url = testDir.appendingPathComponent("sqlite.yaml")
         let yamlStr = try String(contentsOf: url, encoding: .utf8)
         let tests = try YAMLDecoder().decode([SQLiteTestCase].self, from: yamlStr)
 
-        let db = try openDB()
-        defer { sqlite3_close(db) }
+        XCTAssertEqual(tests.count, 79, "expected 79 test cases in sqlite.yaml")
 
-        // Run only raw_sql tests (these test the runtime functions directly,
-        // without needing the transpiler). This validates the Swift port
-        // produces identical output to the C implementation.
-        let rawTests = tests.filter { $0.raw_sql != nil }
-        XCTAssertGreaterThan(rawTests.count, 0, "no raw_sql tests found")
+        for tc in tests {
+            let db = try openDB()
+            defer { sqlite3_close(db) }
 
-        for tc in rawTests {
             // Setup
             for sql in tc.setup ?? [] {
-                try execSQL(db, sql)
+                do {
+                    try execSQL(db, sql)
+                } catch {
+                    XCTFail("\(tc.name): setup failed: \(error)")
+                    continue
+                }
             }
 
-            let rows = try queryRows(db, tc.raw_sql!)
+            // Determine the query SQL and execute.
+            var rows: [String]
 
+            if let rawSQL = tc.raw_sql {
+                // raw_sql: execute directly, no transpilation.
+                rows = try queryRows(db, rawSQL)
+            } else if let steps = tc.steps {
+                // Multi-step test: transpile and execute each step.
+                rows = []
+                for step in steps {
+                    if let execInput = step.transpile_exec {
+                        let sql = try transpile(execInput, fks: tc.fks)
+                        try execSQL(db, sql)
+                    } else if let queryInput = step.transpile_query {
+                        let sql = try transpile(queryInput, fks: tc.fks)
+                        rows = try queryRows(db, sql)
+                    }
+                }
+            } else if let input = tc.input {
+                // Standard: transpile input and query.
+                let sql = try transpile(input, fks: tc.fks)
+                rows = try queryRows(db, sql)
+            } else {
+                XCTFail("\(tc.name): no input, raw_sql, or steps")
+                continue
+            }
+
+            // Verify results.
             if let expected = tc.expected {
                 XCTAssertEqual(rows.count, expected.count,
-                               "\(tc.name): row count mismatch")
+                               "\(tc.name): row count mismatch (got \(rows.count), want \(expected.count))")
                 for (i, want) in expected.enumerated() {
+                    guard i < rows.count else { break }
                     XCTAssertEqual(rows[i], want,
                                    "\(tc.name) row[\(i)]")
+                }
+            }
+
+            if let contains = tc.expected_contains {
+                XCTAssertEqual(rows.count, 1,
+                               "\(tc.name): expected_contains requires exactly 1 row, got \(rows.count)")
+                if let row = rows.first {
+                    for sub in contains {
+                        XCTAssertTrue(row.contains(sub),
+                                      "\(tc.name): expected row to contain \"\(sub)\", got \"\(row)\"")
+                    }
                 }
             }
         }
