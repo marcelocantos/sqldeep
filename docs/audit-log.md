@@ -104,3 +104,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `3f94819`
 - **Outcome**: Released v0.16.0 (darwin-arm64, linux-amd64, linux-arm64). JSONML/JSX functions switched from BLOB protocol to TEXT with JSON subtype 74 — no CAST needed, views composable, json_object preserves inline JSON. XML mode retains BLOB+CAST. SQLITE_SUBTYPE flag on all subtype-aware functions. 441 assertions pass (84 test cases).
+
+## 2026-04-07 — /release v0.20.0
+
+- **Commit**: `6c508b9`
+- **Outcome**: Released v0.20.0 (darwin-arm64, linux-amd64, linux-arm64). Multi-language bindings: Swift (pure Swift runtime + CSQLDeep transpiler wrapper, macOS SPM + iOS Simulator), Kotlin/Android (JNI transpiler bridge + pure Kotlin runtime, Android device/emulator + JVM desktop). Shared test suite: 79 YAML-driven integration tests exercised across C++, Go, Swift, and Kotlin. README and agents guide updated with binding documentation. 474 assertions pass (8 test cases).
