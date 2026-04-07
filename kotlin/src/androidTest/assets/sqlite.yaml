@@ -1,1 +1,918 @@
-../../../../testdata/sqlite.yaml
+# SQLite integration test data.
+# Shared across all language bindings.
+#
+# Schema:
+#   name:     test name
+#   setup:    list of SQL statements to execute before the test (DDL + inserts)
+#   input:    sqldeep input to transpile and execute (mutually exclusive with raw_sql/steps)
+#   fks:      optional FK metadata for fk-guided transpilation
+#   raw_sql:  raw SQL to execute directly (no transpilation)
+#   steps:    list of {transpile_exec: ...} or {transpile_query: ...} steps
+#   expected: list of expected result rows (strings); always an array
+#   expected_contains: list of substrings that must all appear in the single result row
+
+# ── Single-table tests ──────────────────────────────────────────────
+
+- name: "basic object select"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+    - "INSERT INTO t VALUES(2, 'bob')"
+  input: "SELECT { id, name } FROM t ORDER BY id"
+  expected:
+    - '{"id":1,"name":"alice"}'
+    - '{"id":2,"name":"bob"}'
+
+- name: "renamed field"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT)"
+    - "INSERT INTO t VALUES(1, 'x')"
+  input: "SELECT { item_id: id, value: val } FROM t"
+  expected:
+    - '{"item_id":1,"value":"x"}'
+
+- name: "inline array"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY)"
+    - "INSERT INTO t VALUES(1)"
+  input: "SELECT { id, tags: [10, 20, 30] } FROM t"
+  expected:
+    - '{"id":1,"tags":[10,20,30]}'
+
+- name: "expression with function call"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, a TEXT, b TEXT)"
+    - "INSERT INTO t VALUES(1, NULL, 'fallback')"
+  input: "SELECT { id, v: coalesce(a, b) } FROM t"
+  expected:
+    - '{"id":1,"v":"fallback"}'
+
+# ── Nested subquery tests ───────────────────────────────────────────
+
+- name: "two-level object nesting"
+  setup:
+    - "CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(id INTEGER PRIMARY KEY, cid INTEGER, total REAL)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1, 99.5)"
+    - "INSERT INTO orders VALUES(11, 1, 42.0)"
+  input: |
+    SELECT {
+        id, name,
+        orders: SELECT { order_id: id, total } FROM orders
+                WHERE cid = c.id ORDER BY id,
+    } FROM customers c
+  expected:
+    - '{"id":1,"name":"alice","orders":[{"order_id":10,"total":99.5},{"order_id":11,"total":42.0}]}'
+
+- name: "two-level array subquery"
+  setup:
+    - "CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(id INTEGER PRIMARY KEY, cid INTEGER, total REAL)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1, 99.5)"
+    - "INSERT INTO orders VALUES(11, 1, 42.0)"
+  input: |
+    SELECT {
+        name,
+        totals: SELECT [total] FROM orders
+                WHERE cid = c.id ORDER BY id,
+    } FROM customers c
+  expected:
+    - '{"name":"alice","totals":[99.5,42.0]}'
+
+- name: "three-level nesting"
+  setup:
+    - "CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(id INTEGER PRIMARY KEY, pid INTEGER)"
+    - "CREATE TABLE items(id INTEGER PRIMARY KEY, oid INTEGER, name TEXT, qty INTEGER)"
+    - "INSERT INTO people VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1)"
+    - "INSERT INTO items VALUES(100, 10, 'widget', 3)"
+    - "INSERT INTO items VALUES(101, 10, 'gadget', 1)"
+  input: |
+    SELECT {
+        id, name,
+        orders: SELECT {
+            order_id: id,
+            items: SELECT {
+                item: name,
+                qty,
+            } FROM items i WHERE oid = o.id ORDER BY i.id,
+        } FROM orders o WHERE pid = p.id ORDER BY o.id,
+    } FROM people p
+  expected:
+    - '{"id":1,"name":"alice","orders":[{"order_id":10,"items":[{"item":"widget","qty":3},{"item":"gadget","qty":1}]}]}'
+
+# ── Mixed nesting ───────────────────────────────────────────────────
+
+- name: "mixed array and object nesting"
+  setup:
+    - "CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(id INTEGER PRIMARY KEY, cid INTEGER)"
+    - "CREATE TABLE items(id INTEGER PRIMARY KEY, oid INTEGER, name TEXT)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1)"
+    - "INSERT INTO items VALUES(100, 10, 'thing')"
+  input: |
+    SELECT {
+        id,
+        tags: [1, 2, 3],
+        orders: SELECT {
+            order_id: id,
+            item_names: SELECT [name] FROM items WHERE oid = o.id,
+        } FROM orders o WHERE cid = c.id,
+    } FROM customers c
+  expected:
+    - '{"id":1,"tags":[1,2,3],"orders":[{"order_id":10,"item_names":["thing"]}]}'
+
+# ── Empty subquery results ──────────────────────────────────────────
+
+- name: "empty subquery produces null"
+  setup:
+    - "CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(id INTEGER PRIMARY KEY, cid INTEGER)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+  input: |
+    SELECT {
+        name,
+        orders: SELECT { order_id: id } FROM orders WHERE cid = c.id,
+    } FROM customers c
+  expected:
+    - '{"name":"alice","orders":[]}'
+
+# ── WHERE with expressions ──────────────────────────────────────────
+
+- name: "WHERE clause preserved"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
+    - "INSERT INTO t VALUES(1, 'alice', 1)"
+    - "INSERT INTO t VALUES(2, 'bob', 0)"
+    - "INSERT INTO t VALUES(3, 'carol', 1)"
+  input: "SELECT { id, name } FROM t WHERE active = 1 ORDER BY id"
+  expected:
+    - '{"id":1,"name":"alice"}'
+    - '{"id":3,"name":"carol"}'
+
+# ── Key escaping ───────────────────────────────────────────────────
+
+- name: "single-quote in key"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT)"
+    - "INSERT INTO t VALUES(1, 'x')"
+  input: 'SELECT { "it''s": val } FROM t'
+  expected:
+    - '{"it''s":"x"}'
+
+- name: "SQL doubled-quote string"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY)"
+    - "INSERT INTO t VALUES(1)"
+  input: "SELECT { name: 'O''Brien' } FROM t"
+  expected:
+    - '{"name":"O''Brien"}'
+
+# ── Auto-join (-> syntax) ──────────────────────────────────────────
+
+- name: "two-level auto-join"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER, total REAL)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1, 99.5)"
+    - "INSERT INTO orders VALUES(11, 1, 42.0)"
+  input: |
+    SELECT {
+        customers_id, name,
+        orders: SELECT { orders_id, total }
+                FROM c->orders ORDER BY orders_id,
+    } FROM customers c
+  expected:
+    - '{"customers_id":1,"name":"alice","orders":[{"orders_id":10,"total":99.5},{"orders_id":11,"total":42.0}]}'
+
+- name: "three-level auto-join"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER)"
+    - "CREATE TABLE items(items_id INTEGER PRIMARY KEY, orders_id INTEGER, name TEXT, qty INTEGER)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1)"
+    - "INSERT INTO items VALUES(100, 10, 'widget', 3)"
+    - "INSERT INTO items VALUES(101, 10, 'gadget', 1)"
+  input: |
+    SELECT {
+        customers_id, name,
+        orders: SELECT {
+            orders_id,
+            items: SELECT { name, qty }
+                   FROM o->items ORDER BY items_id,
+        } FROM c->orders o ORDER BY orders_id,
+    } FROM customers c
+  expected:
+    - '{"customers_id":1,"name":"alice","orders":[{"orders_id":10,"items":[{"name":"widget","qty":3},{"name":"gadget","qty":1}]}]}'
+
+# ── FROM-first syntax ───────────────────────────────────────────────
+
+- name: "from-first basic"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+    - "INSERT INTO t VALUES(2, 'bob')"
+  input: "FROM t ORDER BY id SELECT { id, name }"
+  expected:
+    - '{"id":1,"name":"alice"}'
+    - '{"id":2,"name":"bob"}'
+
+- name: "from-first nested"
+  setup:
+    - "CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(id INTEGER PRIMARY KEY, cid INTEGER, total REAL)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1, 99.5)"
+    - "INSERT INTO orders VALUES(11, 1, 42.0)"
+  input: |
+    FROM customers c SELECT {
+        id, name,
+        orders: FROM orders o WHERE o.cid = c.id ORDER BY o.id SELECT { order_id: id, total },
+    }
+  expected:
+    - '{"id":1,"name":"alice","orders":[{"order_id":10,"total":99.5},{"order_id":11,"total":42.0}]}'
+
+- name: "from-first with auto-join"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER, total REAL)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1, 99.5)"
+    - "INSERT INTO orders VALUES(11, 1, 42.0)"
+  input: |
+    FROM customers c SELECT {
+        customers_id, name,
+        orders: FROM c->orders ORDER BY orders_id SELECT { orders_id, total },
+    }
+  expected:
+    - '{"customers_id":1,"name":"alice","orders":[{"orders_id":10,"total":99.5},{"orders_id":11,"total":42.0}]}'
+
+- name: "from-first three-level"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER)"
+    - "CREATE TABLE items(items_id INTEGER PRIMARY KEY, orders_id INTEGER, name TEXT, qty INTEGER)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1)"
+    - "INSERT INTO items VALUES(100, 10, 'widget', 3)"
+    - "INSERT INTO items VALUES(101, 10, 'gadget', 1)"
+  input: |
+    FROM customers c SELECT {
+        customers_id, name,
+        orders: FROM c->orders o ORDER BY orders_id SELECT {
+            orders_id,
+            items: FROM o->items ORDER BY items_id SELECT { name, qty },
+        },
+    }
+  expected:
+    - '{"customers_id":1,"name":"alice","orders":[{"orders_id":10,"items":[{"name":"widget","qty":3},{"name":"gadget","qty":1}]}]}'
+
+# ── Reverse join (<- syntax) ────────────────────────────────────────
+
+- name: "reverse join (many-to-one)"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER, total REAL)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO customers VALUES(2, 'bob')"
+    - "INSERT INTO orders VALUES(10, 1, 99.5)"
+    - "INSERT INTO orders VALUES(11, 2, 42.0)"
+  input: |
+    SELECT {
+        orders_id, total,
+        customer: SELECT { name }
+                  FROM o<-customers c,
+    } FROM orders o ORDER BY orders_id
+  expected:
+    - '{"orders_id":10,"total":99.5,"customer":[{"name":"alice"}]}'
+    - '{"orders_id":11,"total":42.0,"customer":[{"name":"bob"}]}'
+
+# ── Grandchild chain (-> ->) ────────────────────────────────────────
+
+- name: "grandchild chain"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER)"
+    - "CREATE TABLE items(items_id INTEGER PRIMARY KEY, orders_id INTEGER, name TEXT)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1)"
+    - "INSERT INTO orders VALUES(11, 1)"
+    - "INSERT INTO items VALUES(100, 10, 'widget')"
+    - "INSERT INTO items VALUES(101, 10, 'gadget')"
+    - "INSERT INTO items VALUES(102, 11, 'doohickey')"
+  input: |
+    SELECT {
+        customers_id, name,
+        items: SELECT { items_id, name }
+               FROM c->orders o->items i,
+    } FROM customers c
+  expected_contains:
+    - '"customers_id":1'
+    - '"name":"alice"'
+    - '"name":"widget"'
+    - '"name":"gadget"'
+    - '"name":"doohickey"'
+
+# ── Bridge join (many-to-many) ──────────────────────────────────────
+
+- name: "bridge join (many-to-many)"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE custacct(custacct_id INTEGER PRIMARY KEY, customers_id INTEGER, accounts_id INTEGER)"
+    - "CREATE TABLE accounts(accounts_id INTEGER PRIMARY KEY, acct_name TEXT)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO accounts VALUES(100, 'savings')"
+    - "INSERT INTO accounts VALUES(101, 'checking')"
+    - "INSERT INTO custacct VALUES(1, 1, 100)"
+    - "INSERT INTO custacct VALUES(2, 1, 101)"
+  input: |
+    SELECT {
+        customers_id, name,
+        accounts: SELECT { acct_name }
+                  FROM c->custacct<-accounts a
+                  ORDER BY a.accounts_id,
+    } FROM customers c
+  expected:
+    - '{"customers_id":1,"name":"alice","accounts":[{"acct_name":"savings"},{"acct_name":"checking"}]}'
+
+- name: "bridge join with FROM-first"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE custacct(custacct_id INTEGER PRIMARY KEY, customers_id INTEGER, accounts_id INTEGER)"
+    - "CREATE TABLE accounts(accounts_id INTEGER PRIMARY KEY, acct_name TEXT)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO accounts VALUES(100, 'savings')"
+    - "INSERT INTO accounts VALUES(101, 'checking')"
+    - "INSERT INTO custacct VALUES(1, 1, 100)"
+    - "INSERT INTO custacct VALUES(2, 1, 101)"
+  input: |
+    FROM customers c SELECT {
+        customers_id, name,
+        accounts: FROM c->custacct<-accounts a ORDER BY a.accounts_id
+                  SELECT { acct_name },
+    }
+  expected:
+    - '{"customers_id":1,"name":"alice","accounts":[{"acct_name":"savings"},{"acct_name":"checking"}]}'
+
+# ── Singular select (SELECT/1) ──────────────────────────────────────
+
+- name: "singular object select"
+  setup:
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, vendors_id INTEGER)"
+    - "CREATE TABLE vendors(vendors_id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO vendors VALUES(1, 'Acme')"
+    - "INSERT INTO orders VALUES(10, 1)"
+  input: |
+    SELECT {
+        orders_id,
+        vendor: SELECT/1 { name } FROM o<-vendors v,
+    } FROM orders o
+  expected:
+    - '{"orders_id":10,"vendor":{"name":"Acme"}}'
+
+- name: "singular returns null for zero rows"
+  setup:
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, vendors_id INTEGER)"
+    - "CREATE TABLE vendors(vendors_id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO orders VALUES(10, 999)"
+  input: |
+    SELECT {
+        orders_id,
+        vendor: SELECT/1 { name } FROM o<-vendors v,
+    } FROM orders o
+  expected:
+    - '{"orders_id":10,"vendor":null}'
+
+# ── Aggregate field (SELECT expr, no FROM) ──────────────────────────
+
+- name: "aggregate field collects group values"
+  setup:
+    - "CREATE TABLE custacct(customer_id INTEGER, account_id INTEGER)"
+    - "INSERT INTO custacct VALUES(1, 100)"
+    - "INSERT INTO custacct VALUES(1, 200)"
+    - "INSERT INTO custacct VALUES(2, 100)"
+    - "INSERT INTO custacct VALUES(2, 200)"
+    - "INSERT INTO custacct VALUES(3, 300)"
+  input: |
+    FROM (
+        FROM custacct a GROUP BY a.customer_id
+        SELECT a.customer_id,
+            (SELECT group_concat(account_id)
+             FROM (SELECT account_id FROM custacct b
+                   WHERE b.customer_id = a.customer_id
+                   ORDER BY account_id)) AS acct_sig
+    ) c
+    GROUP BY c.acct_sig HAVING count(*) > 1
+    SELECT {
+        accounts: c.acct_sig,
+        customers: SELECT c.customer_id,
+    }
+  expected:
+    - '{"accounts":"100,200","customers":[1,2]}'
+
+- name: "aggregate field singular returns last value"
+  setup:
+    - "CREATE TABLE t(grp TEXT, val INTEGER)"
+    - "INSERT INTO t VALUES('a', 1)"
+    - "INSERT INTO t VALUES('a', 2)"
+    - "INSERT INTO t VALUES('b', 3)"
+  input: |
+    FROM t GROUP BY grp ORDER BY grp
+    SELECT {
+        grp,
+        total: SELECT/1 sum(val),
+    }
+  expected:
+    - '{"grp":"a","total":3}'
+    - '{"grp":"b","total":3}'
+
+- name: "aggregate field multiple in one object"
+  setup:
+    - "CREATE TABLE t(grp TEXT, name TEXT, val INTEGER)"
+    - "INSERT INTO t VALUES('x', 'alice', 10)"
+    - "INSERT INTO t VALUES('x', 'bob', 20)"
+    - "INSERT INTO t VALUES('y', 'carol', 30)"
+  input: |
+    FROM t GROUP BY grp ORDER BY grp
+    SELECT {
+        grp,
+        names: SELECT name,
+        total: SELECT/1 sum(val),
+    }
+  expected:
+    - '{"grp":"x","names":["alice","bob"],"total":30}'
+    - '{"grp":"y","names":["carol"],"total":30}'
+
+- name: "aggregate field with function expression"
+  setup:
+    - "CREATE TABLE t(grp TEXT, name TEXT)"
+    - "INSERT INTO t VALUES('a', 'hello')"
+    - "INSERT INTO t VALUES('a', 'world')"
+  input: |
+    FROM t WHERE grp = 'a' GROUP BY grp
+    SELECT { grp, labels: SELECT upper(name) }
+  expected:
+    - '{"grp":"a","labels":["HELLO","WORLD"]}'
+
+# ── Computed keys ────────────────────────────────────────────────────
+
+- name: "computed key builds dynamic JSON keys"
+  setup:
+    - "CREATE TABLE t(k TEXT, v INTEGER)"
+    - "INSERT INTO t VALUES('x', 1)"
+    - "INSERT INTO t VALUES('y', 2)"
+  input: "SELECT { ('key_' || k): v } FROM t ORDER BY k"
+  expected:
+    - '{"key_x":1}'
+    - '{"key_y":2}'
+
+- name: "computed key mixed with static keys"
+  setup:
+    - "CREATE TABLE t(tag TEXT, name TEXT, score INTEGER)"
+    - "INSERT INTO t VALUES('rank', 'alice', 10)"
+  input: "SELECT { name, (tag): score } FROM t"
+  expected:
+    - '{"name":"alice","rank":10}'
+
+# ── Plain FROM-first ─────────────────────────────────────────────────
+
+- name: "plain from-first"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+    - "INSERT INTO t VALUES(2, 'bob')"
+  input: "FROM t ORDER BY id SELECT id, name"
+  expected:
+    - "1"
+    - "2"
+
+- name: "plain from-first as scalar subquery"
+  setup:
+    - "CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(id INTEGER PRIMARY KEY, cid INTEGER, total REAL)"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1, 99.5)"
+    - "INSERT INTO orders VALUES(11, 1, 42.0)"
+  input: |
+    SELECT {
+        name,
+        total: FROM orders WHERE cid = c.id SELECT sum(total),
+    } FROM customers c
+  expected:
+    - '{"name":"alice","total":141.5}'
+
+# ── SQL passthrough ─────────────────────────────────────────────────
+
+- name: "plain SQL passthrough"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+  raw_sql: "SELECT id, name FROM t"
+  expected:
+    - "1"
+
+# ── JSON arrow operators ────────────────────────────────────────────
+
+- name: "json ->> operator passthrough"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, data TEXT)"
+    - "INSERT INTO t VALUES(1, '{\"name\":\"alice\"}')"
+  input: "SELECT { id, name: data->>'name' } FROM t"
+  expected:
+    - '{"id":1,"name":"alice"}'
+
+- name: "json -> operator in WHERE"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, data TEXT)"
+    - "INSERT INTO t VALUES(1, '{\"type\":\"a\"}')"
+    - "INSERT INTO t VALUES(2, '{\"type\":\"b\"}')"
+  input: "SELECT { id } FROM t WHERE data->>'type' = 'a'"
+  expected:
+    - '{"id":1}'
+
+# ── Deep constructs at any paren depth ─────────────────────────────
+
+- name: "deep select in function call"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+  input: "SELECT coalesce((SELECT { id, name } FROM t LIMIT 1), 'none')"
+  expected:
+    - '{"id":1,"name":"alice"}'
+
+- name: "from-first in function call"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'bob')"
+  input: "SELECT coalesce((FROM t SELECT { id, name }), 'none') LIMIT 1"
+  expected:
+    - '{"id":1,"name":"bob"}'
+
+- name: "xml literal in function call"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+  input: "SELECT upper(<b>{name}</b>) FROM t"
+  expected:
+    - "<B>ALICE</B>"
+
+# ── JSON booleans ──────────────────────────────────────────────────
+
+- name: "true/false in json object"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY)"
+    - "INSERT INTO t VALUES(1)"
+  input: "SELECT { id, active: true, deleted: false } FROM t"
+  expected:
+    - '{"id":1,"active":true,"deleted":false}'
+
+- name: "true/false in json array"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY)"
+    - "INSERT INTO t VALUES(1)"
+  input: "SELECT { flags: [true, false, 1] } FROM t"
+  expected:
+    - '{"flags":[true,false,1]}'
+
+# ── Recursive select ────────────────────────────────────────────────
+
+- name: "recursive tree"
+  setup:
+    - "CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER)"
+    - "INSERT INTO categories VALUES(1, 'Root', NULL)"
+    - "INSERT INTO categories VALUES(2, 'A', 1)"
+    - "INSERT INTO categories VALUES(3, 'B', 1)"
+    - "INSERT INTO categories VALUES(4, 'A1', 2)"
+  input: |
+    SELECT/1 { id, name, children: * }
+    FROM categories
+    RECURSE ON (parent_id)
+    WHERE parent_id IS NULL
+  expected:
+    - '{"id":1,"name":"Root","children":[{"id":2,"name":"A","children":[{"id":4,"name":"A1","children":[]}]},{"id":3,"name":"B","children":[]}]}'
+
+- name: "recursive forest"
+  setup:
+    - "CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER)"
+    - "INSERT INTO categories VALUES(1, 'Root1', NULL)"
+    - "INSERT INTO categories VALUES(2, 'Root2', NULL)"
+    - "INSERT INTO categories VALUES(3, 'Child1', 1)"
+  input: |
+    SELECT { id, name, children: * }
+    FROM categories
+    RECURSE ON (parent_id)
+    WHERE parent_id IS NULL
+  expected:
+    - '[{"id":1,"name":"Root1","children":[{"id":3,"name":"Child1","children":[]}]},{"id":2,"name":"Root2","children":[]}]'
+
+- name: "recursive empty tree"
+  setup:
+    - "CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER)"
+  input: |
+    SELECT/1 { id, name, children: * }
+    FROM categories
+    RECURSE ON (parent_id)
+    WHERE parent_id IS NULL
+  expected:
+    - "NULL"
+
+# ── FK-guided joins ─────────────────────────────────────────────────
+
+- name: "fk-guided join"
+  setup:
+    - "CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(id INTEGER PRIMARY KEY, cust_id INTEGER, total REAL, FOREIGN KEY(cust_id) REFERENCES customers(id))"
+    - "INSERT INTO customers VALUES(1, 'alice')"
+    - "INSERT INTO orders VALUES(10, 1, 99.5)"
+    - "INSERT INTO orders VALUES(11, 1, 42.0)"
+  input: |
+    SELECT {
+        name,
+        orders: FROM c->orders o ORDER BY o.id SELECT { total },
+    } FROM customers c
+  fks:
+    - from_table: orders
+      to_table: customers
+      columns:
+        - { from_column: cust_id, to_column: id }
+  expected:
+    - '{"name":"alice","orders":[{"total":99.5},{"total":42.0}]}'
+
+- name: "fk-guided multi-column join"
+  setup:
+    - "CREATE TABLE regions(region TEXT, shop TEXT, name TEXT, PRIMARY KEY(region, shop))"
+    - "CREATE TABLE sales(id INTEGER PRIMARY KEY, region TEXT, shop TEXT, amount REAL)"
+    - "INSERT INTO regions VALUES('east', 'a', 'East A')"
+    - "INSERT INTO regions VALUES('east', 'b', 'East B')"
+    - "INSERT INTO sales VALUES(1, 'east', 'a', 100.0)"
+    - "INSERT INTO sales VALUES(2, 'east', 'a', 200.0)"
+    - "INSERT INTO sales VALUES(3, 'east', 'b', 50.0)"
+  input: |
+    SELECT {
+        name,
+        sales: FROM r->sales s ORDER BY s.id SELECT { amount },
+    } FROM regions r ORDER BY r.region, r.shop
+  fks:
+    - from_table: sales
+      to_table: regions
+      columns:
+        - { from_column: region, to_column: region }
+        - { from_column: shop, to_column: shop }
+  expected:
+    - '{"name":"East A","sales":[{"amount":100.0},{"amount":200.0}]}'
+    - '{"name":"East B","sales":[{"amount":50.0}]}'
+
+# ── XML integration tests ──────────────────────────────────────────
+
+- name: "xml static element"
+  setup: []
+  input: "SELECT <div>hello</div>"
+  expected:
+    - "<div>hello</div>"
+
+- name: "xml with attributes"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, cls TEXT)"
+    - "INSERT INTO t VALUES(1, 'highlight')"
+  input: "SELECT <span class={cls}>text</span> FROM t"
+  expected:
+    - '<span class="highlight">text</span>'
+
+- name: "xml interpolation"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+  input: "SELECT <td>{name}</td> FROM t"
+  expected:
+    - "<td>alice</td>"
+
+- name: "xml escaping"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT)"
+    - "INSERT INTO t VALUES(1, '<b>bold</b>')"
+  input: "SELECT <td>{val}</td> FROM t"
+  expected:
+    - "<td>&lt;b&gt;bold&lt;/b&gt;</td>"
+
+- name: "xml nested elements"
+  setup: []
+  input: "SELECT <div><span>inner</span></div>"
+  expected:
+    - "<div><span>inner</span></div>"
+
+- name: "xml self-closing"
+  setup: []
+  input: "SELECT <br/>"
+  expected:
+    - "<br/>"
+
+- name: "xml empty non-void element"
+  setup: []
+  input: "SELECT <div></div>"
+  expected:
+    - "<div></div>"
+
+- name: "xml dedent multi-line"
+  setup: []
+  input: "SELECT <div>\n      <span>text</span>\n    </div>"
+  expected:
+    - "<div>\n  <span>text</span>\n</div>"
+
+- name: "xml boolean attribute"
+  setup: []
+  input: "SELECT <input disabled/>"
+  expected:
+    - "<input disabled/>"
+
+- name: "xml dynamic boolean attribute true"
+  setup: []
+  raw_sql: "SELECT CAST(xml_element('input/', xml_attrs('checked', sqldeep_json('true'))) AS TEXT)"
+  expected:
+    - "<input checked/>"
+
+- name: "xml dynamic boolean attribute false"
+  setup: []
+  raw_sql: "SELECT CAST(xml_element('input/', xml_attrs('checked', sqldeep_json('false'))) AS TEXT)"
+  expected:
+    - "<input/>"
+
+- name: "xml dynamic boolean attribute integer"
+  setup: []
+  raw_sql: "SELECT CAST(xml_element('td', xml_attrs('colspan', 1)) AS TEXT)"
+  expected:
+    - '<td colspan="1"></td>'
+
+- name: "xml subquery"
+  setup:
+    - "CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO items VALUES(1, 'apple')"
+    - "INSERT INTO items VALUES(2, 'banana')"
+  input: "SELECT <ul>{SELECT <li>{name}</li> FROM items ORDER BY id}</ul>"
+  expected:
+    - "<ul><li>apple</li><li>banana</li></ul>"
+
+- name: "xml inside json"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+  input: "SELECT { name, badge: <b>{name}</b> } FROM t"
+  expected:
+    - '{"name":"alice","badge":"<b>alice</b>"}'
+
+- name: "xml mixed text and interpolation"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, amt TEXT)"
+    - "INSERT INTO t VALUES(1, '42')"
+  input: "SELECT <td>Price: {amt}</td> FROM t"
+  expected:
+    - "<td>Price: 42</td>"
+
+- name: "xml empty subquery"
+  setup:
+    - "CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)"
+  input: "SELECT <ul>{SELECT <li>{name}</li> FROM items}</ul>"
+  expected:
+    - "<ul></ul>"
+
+# ── JSONML integration tests ───────────────────────────────────────
+
+- name: "jsonml static element"
+  setup: []
+  input: "SELECT jsonml(<div>hello</div>)"
+  expected:
+    - '["div","hello"]'
+
+- name: "jsonml self-closing"
+  setup: []
+  input: "SELECT jsonml(<br/>)"
+  expected:
+    - '["br"]'
+
+- name: "jsonml with attributes"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, cls TEXT)"
+    - "INSERT INTO t VALUES(1, 'highlight')"
+  input: "SELECT jsonml(<span class={cls}>text</span>) FROM t"
+  expected:
+    - '["span",{"class":"highlight"},"text"]'
+
+- name: "jsonml interpolation"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+  input: "SELECT jsonml(<td>{name}</td>) FROM t"
+  expected:
+    - '["td","alice"]'
+
+- name: "jsonml escaping"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT)"
+    - "INSERT INTO t VALUES(1, 'he said \"hi\"')"
+  input: "SELECT jsonml(<td>{val}</td>) FROM t"
+  expected:
+    - '["td","he said \"hi\""]'
+
+- name: "jsonml nested elements"
+  setup: []
+  input: "SELECT jsonml(<div><span>inner</span></div>)"
+  expected:
+    - '["div",["span","inner"]]'
+
+- name: "jsonml subquery"
+  setup:
+    - "CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO items VALUES(1, 'apple')"
+    - "INSERT INTO items VALUES(2, 'banana')"
+  input: "SELECT jsonml(<ul>{SELECT <li>{name}</li> FROM items ORDER BY id}</ul>)"
+  expected:
+    - '["ul",["li","apple"],["li","banana"]]'
+
+- name: "jsonml empty subquery"
+  setup:
+    - "CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)"
+  input: "SELECT jsonml(<ul>{SELECT <li>{name}</li> FROM items}</ul>)"
+  expected:
+    - '["ul"]'
+
+- name: "jsonml inside json"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+  input: "SELECT { name, badge: jsonml(<b>{name}</b>) } FROM t"
+  expected:
+    - '{"name":"alice","badge":["b","alice"]}'
+
+# ── JSX mode ───────────────────────────────────────────────────────
+
+- name: "jsx static element"
+  setup: []
+  input: "SELECT jsx(<div>hello</div>)"
+  expected:
+    - '["div","hello"]'
+
+- name: "jsx string attribute"
+  setup: []
+  input: 'SELECT jsx(<div class="card">text</div>)'
+  expected:
+    - '["div",{"class":"card"},"text"]'
+
+- name: "jsx preserves json object attribute"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, x INTEGER, y INTEGER)"
+    - "INSERT INTO t VALUES(1, 10, 20)"
+  input: "SELECT jsx(<Graph data={{x, y}}/>) FROM t LIMIT 1"
+  expected:
+    - '["Graph",{"data":{"x":10,"y":20}}]'
+
+- name: "jsx boolean attribute true"
+  setup: []
+  input: "SELECT jsx(<input disabled/>)"
+  expected:
+    - '["input",{"disabled":true}]'
+
+- name: "jsx boolean attribute false"
+  setup: []
+  input: "SELECT jsx(<input checked={false}/>)"
+  expected:
+    - '["input",{"checked":false}]'
+
+- name: "jsx mixed static and json attributes"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY)"
+    - "INSERT INTO t VALUES(1)"
+  input: "SELECT jsx(<Widget title=\"Sales\" config={{color: 'blue'}}/>) FROM t LIMIT 1"
+  expected:
+    - '["Widget",{"title":"Sales","config":{"color":"blue"}}]'
+
+- name: "jsx subquery aggregation"
+  setup:
+    - "CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO items VALUES(1, 'apple')"
+    - "INSERT INTO items VALUES(2, 'banana')"
+  input: "SELECT jsx(<ul>{SELECT <li>{name}</li> FROM items ORDER BY id}</ul>)"
+  expected:
+    - '["ul",["li","apple"],["li","banana"]]'
+
+- name: "jsx direct composition"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'hello')"
+  input: 'SELECT jsx(<div class="outer">{SELECT <span class="green">{name}</span> FROM t}</div>)'
+  expected:
+    - '["div",{"class":"outer"},["span",{"class":"green"},"hello"]]'
+
+- name: "jsx view recomposition"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'hello')"
+  steps:
+    - transpile_exec: 'CREATE VIEW v_inner AS SELECT jsx(<span class="green">{name}</span>) AS col FROM t'
+    - transpile_query: 'SELECT jsx(<div class="outer">{(SELECT col FROM v_inner)}</div>)'
+  expected:
+    - '["div",{"class":"outer"},["span",{"class":"green"},"hello"]]'
