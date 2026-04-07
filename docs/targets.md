@@ -1,6 +1,6 @@
 # Targets
 
-<!-- last-evaluated: 149089b -->
+<!-- last-evaluated: 2408fd0 -->
 
 ## Active
 
@@ -19,44 +19,19 @@
 - **Status**: blocked (settling period — need Experimental items to prove out)
 - **Discovered**: 2026-03-12
 
-### 🎯T3 XML/HTML literals produce well-formed markup directly from SQL queries
-- **Weight**: TBD
-- **Acceptance**:
-  - `<tag attr={expr}>...</tag>` transpiles to `xml_element('tag', xml_attrs('attr', expr), ...)` calls
-  - `{expr}` interpolation inside XML content and attributes
-  - `{SELECT ...}` nested subqueries inside XML with aggregation (`xml_agg`)
-  - Self-closing elements, namespaced tags, boolean attributes
-  - XML literals valid inside JSON object fields (`{ name, card: <div>...</div> }`)
-  - JSON path navigation `(expr).path[n]` works inside XML interpolation
-  - `{{name, qty}}` produces JSON object inside XML (outer = interpolation, inner = object)
-  - Literal braces via `{'{'}` / `{'}'}`
-  - Both SQLite and PostgreSQL backends
-  - Transpilation tests and SQLite integration tests
-  - XML functions registered in sqlpipe (out of scope for sqldeep itself — sqldeep is string→string)
-- **Context**: Design paper at `docs/papers/xml-literals.md`. Motivated by sqlpipe reactive UI — single SQL expression produces query + component tree. Inspired by arr.ai AuctionFox demo.
-- **Status**: achieved (v0.9.0)
-- **Discovered**: 2026-04-05
-
-### 🎯T4 xml_to_jsonml() transpiler macro converts XML literals to JSONML output
-- **Weight**: TBD
-- **Acceptance**:
-  - `xml_to_jsonml(<div class="card">hello</div>)` transpiles to `CAST(xml_element_jsonml('div', xml_attrs_jsonml('class', 'card'), 'hello') AS TEXT)`
-  - Runtime output: `["div",{"class":"card"},"hello"]`
-  - Nested elements produce nested JSONML arrays
-  - Attributes become a JSON object as the second element (omitted if no attributes)
-  - Text children become JSON strings
-  - Empty elements: `<br/>` → `["br"]`
-  - Subquery aggregation uses `jsonml_agg` instead of `xml_agg`
-  - BLOB protocol: `_jsonml` functions return BLOBs (`[` = element, `{` = attrs)
-  - Registered alongside existing XML functions via `sqldeep_register_sqlite()`
-  - Transpilation tests and SQLite integration tests
-- **Context**: XML literals are the authoring syntax; JSONML is an easier format for programmatic consumption. Transpiler-level macro avoids wasteful XML→parse→JSONML round-trip — the structure is preserved from the AST through to the runtime functions.
-- **Status**: achieved (v0.12.0)
-- **Discovered**: 2026-04-05
-
 ## Achieved
 
 ### 🎯T2 Recursive tree construction from self-referential tables
 - **Achieved**: 2026-03-15 (commit 149089b)
 - **Acceptance**: All criteria met — parser, renderer, both backends, singular/forest modes, explicit PK, integration tests with 3+ levels, transpilation tests. 47 tests, 325 assertions passing.
 - **Discovered**: 2026-03-12
+
+### 🎯T3 XML/HTML literals produce well-formed markup directly from SQL queries
+- **Achieved**: 2026-04-05 (v0.9.0)
+- **Acceptance**: All criteria met — XML element transpilation, interpolation, subqueries, self-closing, namespaced tags, boolean attributes, JSON interop, both backends, transpilation and integration tests.
+- **Discovered**: 2026-04-05
+
+### 🎯T4 xml_to_jsonml() transpiler macro converts XML literals to JSONML output
+- **Achieved**: 2026-04-05 (v0.12.0)
+- **Acceptance**: All criteria met — JSONML transpilation, nested elements, attributes, text children, empty elements, subquery aggregation, BLOB protocol, function registration, transpilation and integration tests.
+- **Discovered**: 2026-04-05
