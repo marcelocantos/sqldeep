@@ -20,8 +20,9 @@ func init() {
 type Backend int
 
 const (
-	SQLite   Backend = iota // SQLite JSON functions (default)
-	Postgres                // PostgreSQL jsonb functions
+	SQLite        Backend = iota // Custom sqldeep JSON functions (BLOB protocol)
+	Postgres                    // PostgreSQL jsonb functions
+	SQLiteVanilla               // Built-in SQLite JSON functions (no custom functions needed)
 )
 
 // Error represents a transpilation error with source position.
@@ -84,6 +85,13 @@ func TranspileBackend(input string, backend Backend) (string, error) {
 // TranspilePostgres is a convenience wrapper for TranspileBackend with Postgres.
 func TranspilePostgres(input string) (string, error) {
 	return TranspileBackend(input, Postgres)
+}
+
+// TranspileVanilla transpiles using only built-in SQLite JSON functions
+// (json_object, json_array, json_group_array). No custom functions needed —
+// works with any SQLite connection including managed services like Turso.
+func TranspileVanilla(input string) (string, error) {
+	return TranspileBackend(input, SQLiteVanilla)
 }
 
 // TranspileFK converts sqldeep syntax to standard SQL using explicit foreign
@@ -155,6 +163,12 @@ func TranspileFKBackend(input string, fks []ForeignKey, backend Backend) (string
 // TranspileFKPostgres is a convenience wrapper for TranspileFKBackend with Postgres.
 func TranspileFKPostgres(input string, fks []ForeignKey) (string, error) {
 	return TranspileFKBackend(input, fks, Postgres)
+}
+
+// TranspileFKVanilla is a convenience wrapper for TranspileFKBackend with
+// built-in SQLite JSON functions.
+func TranspileFKVanilla(input string, fks []ForeignKey) (string, error) {
+	return TranspileFKBackend(input, fks, SQLiteVanilla)
 }
 
 // RegisterSQLite registers all sqldeep runtime functions (XML, JSONML, JSX,

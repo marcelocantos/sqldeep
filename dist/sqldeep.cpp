@@ -27,7 +27,7 @@ struct ForeignKey {
     std::vector<ColumnPair> columns;  // supports multi-column FKs
 };
 
-enum class Backend { sqlite, postgres };
+enum class Backend { sqlite, postgres, sqlite_vanilla };
 
 class Error : public std::runtime_error {
 public:
@@ -441,7 +441,8 @@ static void xml_dedent(XmlElement& el) {
 // In JSON/XML value contexts, wrap a standalone true/false token as
 // sqldeep_json('true')/sqldeep_json('false') so it is returned as a
 // BLOB carrying JSON boolean semantics rather than integer 1/0.
-static void wrap_json_bool(SqlParts& parts) {
+// In vanilla mode, use the built-in json() function instead.
+static void wrap_json_bool(SqlParts& parts, Backend backend = Backend::sqlite) {
     if (parts.size() != 1) return;
     auto* s = std::get_if<std::string>(&parts[0]);
     if (!s || s->size() < 4 || s->size() > 5) return;
@@ -450,8 +451,9 @@ static void wrap_json_bool(SqlParts& parts) {
     lower.reserve(s->size());
     for (char c : *s)
         lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (lower == "true")       *s = "sqldeep_json('true')";
-    else if (lower == "false") *s = "sqldeep_json('false')";
+    const char* fn = (backend == Backend::sqlite_vanilla) ? "json" : "sqldeep_json";
+    if (lower == "true")       { *s = fn; *s += "('true')"; }
+    else if (lower == "false") { *s = fn; *s += "('false')"; }
 }
 
 // ── Parser ──────────────────────────────────────────────────────────
@@ -1428,7 +1430,7 @@ private:
                     if (field.value.empty())
                         lex_.error("expected expression after 'SELECT'",
                                    t2.line, t2.col);
-                    wrap_json_bool(field.value);
+                    wrap_json_bool(field.value, backend_);
                     return field;
                 }
                 // SELECT {/[ — restore and fall through to normal parsing
@@ -1442,7 +1444,7 @@ private:
                                           depth);
             if (field.value.empty())
                 lex_.error("expected expression after ':'", t.line, t.col);
-            wrap_json_bool(field.value);
+            wrap_json_bool(field.value, backend_);
         }
 
         return field;
@@ -1469,7 +1471,7 @@ private:
                                         depth);
             if (elem.empty())
                 lex_.error("expected expression in array literal");
-            wrap_json_bool(elem);
+            wrap_json_bool(elem, backend_);
             arr->elements.push_back(std::move(elem));
 
             t = lex_.peek();
@@ -1550,9 +1552,10 @@ private:
 
             Token eq = lex_.peek();
             if (eq.type != TokenType::Other || eq.text != "=") {
-                // Boolean attribute: emit sqldeep_json('true') so xml_attrs renders bare name
+                // Boolean attribute: emit json wrapper so xml_attrs renders bare name
                 SqlParts val;
-                val.push_back(std::string("sqldeep_json('true')"));
+                const char* jfn = (backend_ == Backend::sqlite_vanilla) ? "json" : "sqldeep_json";
+                val.push_back(std::string(jfn) + "('true')");
                 el->attrs.push_back({attr_name, std::move(val), false});
                 continue;
             }
@@ -1579,7 +1582,7 @@ private:
                 if (rb.type != TokenType::RBrace)
                     lex_.error("expected '}' after attribute expression",
                                rb.line, rb.col);
-                wrap_json_bool(expr);
+                wrap_json_bool(expr, backend_);
                 el->attrs.push_back({attr_name, std::move(expr), true});
             } else {
                 lex_.error("expected '\"...' or '{...}' after '='",
@@ -1782,7 +1785,7 @@ private:
                 if (rb.type != TokenType::RBrace)
                     lex_.error("expected '}' after interpolation",
                                rb.line, rb.col);
-                wrap_json_bool(expr);
+                wrap_json_bool(expr, backend_);
                 XmlElement::Child child;
                 child.kind = XmlElement::Child::Interpolation;
                 child.expr = std::move(expr);
@@ -1987,6 +1990,11 @@ public:
             fn_object_      = "jsonb_build_object";
             fn_array_       = "jsonb_build_array";
             fn_group_array_ = "jsonb_agg";
+            break;
+        case Backend::sqlite_vanilla:
+            fn_object_      = "json_object";
+            fn_array_       = "json_array";
+            fn_group_array_ = "json_group_array";
             break;
         default:
             fn_object_      = "sqldeep_json_object";
@@ -2452,8 +2460,11 @@ void clear_error(char** err_msg, int* err_line, int* err_col) {
 }
 
 sqldeep::Backend to_backend(sqldeep_backend b) {
-    return b == SQLDEEP_POSTGRES ? sqldeep::Backend::postgres
-                                 : sqldeep::Backend::sqlite;
+    switch (b) {
+    case SQLDEEP_POSTGRES:       return sqldeep::Backend::postgres;
+    case SQLDEEP_SQLITE_VANILLA: return sqldeep::Backend::sqlite_vanilla;
+    default:                     return sqldeep::Backend::sqlite;
+    }
 }
 
 std::vector<sqldeep::ForeignKey> to_cpp_fks(const sqldeep_foreign_key* fks,

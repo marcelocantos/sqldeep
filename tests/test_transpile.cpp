@@ -182,6 +182,49 @@ TEST_CASE("fk transpile (postgres)") {
     }
 }
 
+// ── Vanilla SQLite convention transpile tests ──────────────────────
+
+// Derive vanilla expected output from SQLite expected by replacing
+// custom function names with built-in SQLite ones.
+static std::string to_vanilla(const std::string& s) {
+    std::string out = s;
+    auto replace_all = [&](const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = out.find(from, pos)) != std::string::npos) {
+            out.replace(pos, from.size(), to);
+            pos += to.size();
+        }
+    };
+    replace_all("sqldeep_json_group_array", "json_group_array");
+    replace_all("sqldeep_json_object", "json_object");
+    replace_all("sqldeep_json_array", "json_array");
+    replace_all("sqldeep_json(", "json(");
+    return out;
+}
+
+TEST_CASE("convention transpile (vanilla)") {
+    for (const auto& tc : test_data()["convention"]) {
+        auto name = tc["name"].get_value<std::string>();
+        SUBCASE(name.c_str()) {
+            auto input = tc["input"].get_value<std::string>();
+            auto expected = to_vanilla(tc["expected"].get_value<std::string>());
+            CHECK(transpile(input, SQLDEEP_SQLITE_VANILLA) == expected);
+        }
+    }
+}
+
+TEST_CASE("fk transpile (vanilla)") {
+    for (const auto& tc : test_data()["fk"]) {
+        auto name = tc["name"].get_value<std::string>();
+        SUBCASE(name.c_str()) {
+            auto input = tc["input"].get_value<std::string>();
+            auto expected = to_vanilla(tc["expected"].get_value<std::string>());
+            auto fks = to_fks(tc["fks"]);
+            CHECK(transpile(input, fks, SQLDEEP_SQLITE_VANILLA) == expected);
+        }
+    }
+}
+
 // ── Convention error tests ──────────────────────────────────────────
 
 TEST_CASE("convention errors") {
