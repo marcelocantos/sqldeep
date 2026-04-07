@@ -328,13 +328,16 @@ with sqldeep transpilation and XML functions (`xml_element`, `xml_attrs`,
 
 ## Integration
 
+### C/C++
+
 Copy `dist/sqldeep.h` and `dist/sqldeep.cpp` into your project and compile as
 C++20. No external dependencies at runtime.
 
-If your project uses XML literals and targets SQLite, also include
-`dist/sqldeep_xml.h` and `dist/sqldeep_xml.c`. These provide reference
-implementations of `xml_element`, `xml_attrs`, and `xml_agg` as SQLite custom
-functions. Register them on each connection:
+For SQLite targets, also include `dist/sqldeep_xml.h` and `dist/sqldeep_xml.c`.
+These provide the full set of custom SQLite functions that transpiled SQL calls:
+`xml_element`, `xml_attrs`, `xml_agg` (and their `_jsonml`/`_jsx` variants),
+plus `sqldeep_json`, `sqldeep_json_object`, `sqldeep_json_array`, and
+`sqldeep_json_group_array`. Register them once per connection:
 
 ```c
 #include "sqldeep_xml.h"
@@ -342,10 +345,92 @@ functions. Register them on each connection:
 sqldeep_register_sqlite(db);  // returns SQLITE_OK on success
 ```
 
-`sqldeep_xml.c` compiles as C and requires `sqlite3.h` at compile time.
+All structured values (XML, JSON objects/arrays, booleans) are returned as
+SQLite BLOBs, allowing them to survive through views, CTEs, and subqueries
+without losing type information.
+
+### Go
+
+```sh
+go get github.com/marcelocantos/sqldeep/go/sqldeep
+```
+
+The Go module wraps the C transpiler via cgo and includes a pure-Go port of the
+SQLite runtime functions. Importing the package auto-registers the runtime on
+every new SQLite connection (via `sqlite3_auto_extension`), so
+[go-sqlite3](https://github.com/mattn/go-sqlite3) connections work out of the
+box:
+
+```go
+import (
+    "database/sql"
+    _ "github.com/mattn/go-sqlite3"
+    "github.com/marcelocantos/sqldeep/go/sqldeep"
+)
+
+output, err := sqldeep.Transpile(input)
+// Execute output against any go-sqlite3 database — runtime functions are
+// already registered.
+```
+
+### Swift
+
+The `swift/` directory contains a Swift Package with two components:
+
+- **SQLDeepRuntime** — pure Swift port of all SQLite runtime functions
+  (JSON, XML, JSONML, JSX). Call `sqldeepRegisterSQLite(db)` once per connection.
+- **Transpiler** — Swift wrapper around the C transpiler API via a `CSQLDeep`
+  clang module.
+
+```swift
+import SQLDeepRuntime
+
+let sql = try sqldeepTranspile("FROM users SELECT { id, name }")
+// Execute sql against SQLite with sqldeepRegisterSQLite(db) registered.
+```
+
+Requires linking against the pre-built `libsqldeep.a` static library. See
+`swift/Package.swift` for linker flags.
+
+### Kotlin/Android
+
+The `kotlin/` directory contains an Android library with JNI bindings:
+
+- **SQLDeep** — transpiler (`SQLDeep.transpile()`, `SQLDeep.transpileFK()`)
+- **SQLDeepRuntime** — pure Kotlin port of all SQLite runtime functions
+- **SQLDeepTestHelper** — JNI bridge for direct SQLite access in tests
+
+```kotlin
+import com.marcelocantos.sqldeep.SQLDeep
+import com.marcelocantos.sqldeep.SQLDeepRuntime
+
+val sql = SQLDeep.transpile("FROM users SELECT { id, name }")
+// Register runtime: SQLDeepRuntime.register(db)
+```
+
+Native code is built via CMake (C++20) through Android's `externalNativeBuild`.
+
+### Agent guide
 
 If you use an agentic coding tool, include `dist/sqldeep-agents-guide.md` in
 your project context.
+
+## Testing
+
+All language bindings share a common test suite defined in `testdata/sqlite.yaml`
+(79 integration test cases). Each language has a thin driver that loads the YAML,
+transpiles sqldeep syntax, executes the resulting SQL against an in-memory SQLite
+database, and verifies the JSON/XML output. This ensures consistent behaviour
+across all platforms:
+
+| Platform | Driver | Tests |
+|---|---|---|
+| C++ (doctest) | `tests/test_sqlite.cpp` | 79 cases |
+| Go | `go/sqldeep/smoke_test.go` | 79 cases |
+| Swift (XCTest) | `swift/Tests/.../SQLiteIntegrationTests.swift` | 79 cases |
+| Swift (iOS Simulator) | xcodegen test host | 79 cases |
+| Kotlin (JVM desktop) | `kotlin/desktop_test.kt` | 79 cases |
+| Kotlin (Android) | `kotlin/src/androidTest/...` | 79 cases |
 
 ## Related projects
 

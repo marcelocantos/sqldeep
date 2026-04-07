@@ -6,14 +6,18 @@ Supports SQLite (default) and PostgreSQL backends.
 
 ## Integration
 
-Copy the `dist/` files (`sqldeep.h` and `sqldeep.cpp`) into your project and
-compile as C++20.
-No link-time dependencies — the database is only needed at runtime by the
-*caller*, not by sqldeep itself.
+### C/C++
 
-If your project uses XML literals and targets SQLite, also include
-`sqldeep_xml.h` and `sqldeep_xml.c`. These provide the `xml_element`,
-`xml_attrs`, and `xml_agg` SQLite functions that the transpiled SQL calls:
+Copy the `dist/` files (`sqldeep.h` and `sqldeep.cpp`) into your project and
+compile as C++20. No link-time dependencies — the database is only needed at
+runtime by the *caller*, not by sqldeep itself.
+
+For SQLite targets, also include `sqldeep_xml.h` and `sqldeep_xml.c`. These
+register all custom SQLite functions that transpiled SQL calls — both XML
+functions (`xml_element`, `xml_attrs`, `xml_agg` and `_jsonml`/`_jsx` variants)
+and JSON functions (`sqldeep_json`, `sqldeep_json_object`, `sqldeep_json_array`,
+`sqldeep_json_group_array`). All structured values are returned as BLOBs,
+allowing them to survive through views, CTEs, and subqueries:
 
 ```c
 #include "sqldeep_xml.h"
@@ -23,6 +27,70 @@ sqldeep_register_sqlite(db);  // call once per connection
 
 `sqldeep_xml.c` compiles as C (not C++20) and requires `sqlite3.h` at compile
 time and the SQLite library at link time.
+
+### Go
+
+```sh
+go get github.com/marcelocantos/sqldeep/go/sqldeep
+```
+
+Wraps the C transpiler via cgo. Importing the package auto-registers all SQLite
+runtime functions on every new connection (via `sqlite3_auto_extension`), so
+[go-sqlite3](https://github.com/mattn/go-sqlite3) databases work immediately:
+
+```go
+import (
+    "github.com/marcelocantos/sqldeep/go/sqldeep"
+    _ "github.com/mattn/go-sqlite3"
+)
+
+sql, err := sqldeep.Transpile(input)
+// Execute sql against any go-sqlite3 db — functions already registered.
+
+// FK-guided:
+sql, err = sqldeep.TranspileFK(input, []sqldeep.ForeignKey{...})
+```
+
+### Swift
+
+The `swift/` directory contains a Swift Package (`SQLDeepRuntime`):
+
+- Pure Swift port of all SQLite runtime functions (JSON, XML, JSONML, JSX)
+- Swift wrapper around the C transpiler API via a `CSQLDeep` clang module
+
+```swift
+import SQLDeepRuntime
+
+let sql = try sqldeepTranspile("FROM users SELECT { id, name }")
+// Register on each connection:
+sqldeepRegisterSQLite(db)  // db is OpaquePointer (sqlite3*)
+```
+
+Requires linking `libsqldeep.a`. See `swift/Package.swift` for flags.
+Also works on iOS — build the static library with `xcrun -sdk iphoneos`.
+
+### Kotlin/Android
+
+The `kotlin/` directory contains an Android library with JNI bindings:
+
+```kotlin
+import com.marcelocantos.sqldeep.SQLDeep
+
+val sql = SQLDeep.transpile("FROM users SELECT { id, name }")
+// FK-guided:
+val sql = SQLDeep.transpileFK(input, listOf(ForeignKey(...)))
+```
+
+Pure Kotlin port of all SQLite runtime functions. Native code built via CMake
+(C++20) through Android's `externalNativeBuild`. Also runs on JVM desktop —
+see `kotlin/desktop_test.kt`.
+
+### Shared test suite
+
+All bindings share `testdata/sqlite.yaml` (79 integration test cases). Each
+language has a ~100-line driver that loads the YAML, transpiles, executes
+against in-memory SQLite, and verifies output. Add new test cases to the YAML
+file and all languages pick them up automatically.
 
 ## API
 
@@ -68,9 +136,9 @@ if (!sql) {
 ### Version macros
 
 ```c
-SQLDEEP_VERSION       // "0.16.0"
+SQLDEEP_VERSION       // "0.19.0"
 SQLDEEP_VERSION_MAJOR // 0
-SQLDEEP_VERSION_MINOR // 16
+SQLDEEP_VERSION_MINOR // 19
 SQLDEEP_VERSION_PATCH // 0
 const char* sqldeep_version(void);  // returns SQLDEEP_VERSION
 ```
