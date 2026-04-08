@@ -139,12 +139,12 @@ Native code built via CMake (C++20). Works on Android and JVM desktop.
 | ON clause | `c->orders o ON id = cust_id` | **Stable** |
 | USING clause | `c->orders o USING (person_id)` | **Stable** |
 | JSON path extraction | `(expr).field[n]` | **Stable** |
-| Line comments | `-- comment` | **Experimental** |
-| Block comments | `/* comment */` | **Experimental** |
+| Line comments | `-- comment` | **Stable** |
+| Block comments | `/* comment */` | **Stable** |
 | Trailing commas | `{ id, name, }` | **Stable** |
 | Plain FROM-first select | `FROM t SELECT id, name` | **Stable** |
 | SQL passthrough | `SELECT id FROM t` | **Stable** |
-| SQL `->` / `->>` passthrough | `data->>'name'` in non-FROM context | **Experimental** |
+| SQL `->` / `->>` passthrough | `data->>'name'` in non-FROM context | **Stable** |
 | Recursive select | `SELECT { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
 | Recursive explicit PK | `RECURSE ON (fk = pk)` | **Experimental** |
 | Recursive singular | `SELECT/1 { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
@@ -212,7 +212,7 @@ Native code built via CMake (C++20). Works on Android and JVM desktop.
 
 | Behaviour | Description | Stability |
 |-----------|-------------|-----------|
-| `->` / `<-` FROM-only | Join arrows only recognised after FROM/JOIN | **Experimental** |
+| `->` / `<-` FROM-only | Join arrows only recognised after FROM/JOIN | **Stable** |
 
 ## Design decisions
 
@@ -265,15 +265,6 @@ The following were evaluated during the pre-1.0 period and are now settled:
 
 Before 1.0:
 
-- **Comment syntax settling**: `--` and `/* */` replaced `//` in v0.7.0.
-  This is a breaking change from v0.6.0. Needs real-world usage to confirm
-  the change was the right call and that no edge cases remain.
-- **`->` FROM-context restriction settling**: Changed parser behaviour in
-  v0.7.0. Needs usage to confirm no false negatives (legitimate join arrows
-  missed) or false positives (non-join `->` incorrectly consumed).
-- **`->>` passthrough settling**: New lexer behaviour in v0.7.0. The lexer
-  extends `->` to `->>` when the `>` is touching. Needs usage to confirm
-  this heuristic is robust.
 - **Recursive select settling**: New in v0.8.0. `RECURSE ON` syntax, `*`
   field marker, and bracket-injection CTE output all need real-world usage.
   Current limitations: top-level only (not nested), integer PKs only,
