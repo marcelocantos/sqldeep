@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.20.0.
+Snapshot as of v0.21.0.
 
 ### C API (`sqldeep.h`)
 
@@ -36,7 +36,7 @@ Snapshot as of v0.20.0.
 | `sqldeep_transpile_fk_backend` | `char* sqldeep_transpile_fk_backend(...)` | **Stable** |
 | `sqldeep_foreign_key` | `struct { from_table, to_table, columns, column_count }` | **Stable** |
 | `sqldeep_column_pair` | `struct { from_column, to_column }` | **Stable** |
-| `sqldeep_backend` | `enum { SQLDEEP_SQLITE, SQLDEEP_POSTGRES }` | **Stable** |
+| `sqldeep_backend` | `enum { SQLDEEP_SQLITE, SQLDEEP_POSTGRES, SQLDEEP_SQLITE_VANILLA }` | **Stable** |
 | `sqldeep_version` | `const char* sqldeep_version(void)` | **Stable** |
 | `sqldeep_free` | `void sqldeep_free(void* ptr)` | **Stable** |
 
@@ -59,9 +59,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.20.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.21.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `20` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `21` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Go API (`go/sqldeep`)
@@ -74,6 +74,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | `TranspileFK` | `func TranspileFK(input string, fks []ForeignKey) (string, error)` | **Stable** |
 | `TranspileFKBackend` | `func TranspileFKBackend(input string, fks []ForeignKey, backend Backend) (string, error)` | **Stable** |
 | `TranspileFKPostgres` | `func TranspileFKPostgres(input string, fks []ForeignKey) (string, error)` | **Stable** |
+| `TranspileVanilla` | `func TranspileVanilla(input string) (string, error)` | **Experimental** |
+| `TranspileFKVanilla` | `func TranspileFKVanilla(input string, fks []ForeignKey) (string, error)` | **Experimental** |
+| `SQLiteVanilla` | `Backend` constant (value 2) | **Experimental** |
 | `RegisterSQLite` | `func RegisterSQLite(db unsafe.Pointer) error` | **Experimental** |
 | `Version` | `func Version() string` | **Stable** |
 | Auto-extension | `init()` calls `sqlite3_auto_extension` — all connections get sqldeep functions | **Experimental** |
