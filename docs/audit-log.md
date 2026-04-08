@@ -109,3 +109,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `6c508b9`
 - **Outcome**: Released v0.20.0 (darwin-arm64, linux-amd64, linux-arm64). Multi-language bindings: Swift (pure Swift runtime + CSQLDeep transpiler wrapper, macOS SPM + iOS Simulator), Kotlin/Android (JNI transpiler bridge + pure Kotlin runtime, Android device/emulator + JVM desktop). Shared test suite: 79 YAML-driven integration tests exercised across C++, Go, Swift, and Kotlin. README and agents guide updated with binding documentation. 474 assertions pass (8 test cases).
+
+## 2026-04-08 — /release v0.21.0
+
+- **Commit**: `9ac5ded`
+- **Outcome**: Released v0.21.0 (darwin-arm64, linux-amd64, linux-arm64). Added SQLDEEP_SQLITE_VANILLA backend for environments without custom functions. Go TranspileVanilla/TranspileFKVanilla convenience functions. 650 assertions pass (10 test cases).
