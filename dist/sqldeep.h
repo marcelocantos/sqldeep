@@ -6,9 +6,9 @@
 // sqldeep — C interface for transpiling JSON5-like SQL syntax to standard SQL.
 // Callers must free returned strings with sqldeep_free().
 
-#define SQLDEEP_VERSION       "0.20.0"
+#define SQLDEEP_VERSION       "0.21.0"
 #define SQLDEEP_VERSION_MAJOR 0
-#define SQLDEEP_VERSION_MINOR 20
+#define SQLDEEP_VERSION_MINOR 21
 #define SQLDEEP_VERSION_PATCH 0
 
 #ifdef __cplusplus
