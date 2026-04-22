@@ -1,0 +1,53 @@
+targets:
+  T1:
+    name: sqldeep reaches v1.0.0 with all syntax and API surfaces declared stable
+    status: converging
+    value: 13.0
+    cost: 3.0
+    acceptance:
+    - All items in STABILITY.md are marked Stable (no Experimental or Needs review remaining)
+    - STABILITY.md Gaps and prerequisites section is resolved or moved to Out of scope
+    - Settling threshold met (N consecutive minor releases with zero breaking changes)
+    - Version macros in sqldeep.h read 1.0.0
+    - sqldeep_version() returns 1.0.0
+    - 'GitHub issue #10 is closed (resolved by computed key syntax)'
+    - Tagged release v1.0.0 exists on GitHub
+    context: v0.7.0 introduced Experimental items (SQL comments, -> FROM-context restriction, ->> passthrough) and a breaking change (removed // comments). v0.8.0 adds recursive select (also Experimental). The settling clock requires these features to prove out through real-world usage before promotion to Stable. Currently at v0.21.0 with ~45 Experimental items across C API, Go/Swift/Kotlin bindings, input syntax, output semantics, and parser behaviour.
+    origin: targets.md bootstrap
+    discovered: 2026-04-08
+  T2:
+    name: Recursive tree construction from self-referential tables
+    status: achieved
+    value: 8.0
+    cost: 3.0
+    actual_cost: 3.0
+    acceptance:
+    - Parser, renderer, both backends, singular/forest modes, explicit PK, integration tests with 3+ levels, transpilation tests
+    context: Achieved 2026-03-15 (commit 149089b). All criteria met.
+    origin: targets.md bootstrap
+    discovered: 2026-04-08
+    achieved: 2026-04-08
+  T3:
+    name: XML/HTML literals produce well-formed markup directly from SQL queries
+    status: achieved
+    value: 8.0
+    cost: 5.0
+    actual_cost: 5.0
+    acceptance:
+    - XML element transpilation, interpolation, subqueries, self-closing, namespaced tags, boolean attributes, JSON interop, both backends, transpilation and integration tests
+    context: Achieved 2026-04-05 (v0.9.0). All criteria met.
+    origin: targets.md bootstrap
+    discovered: 2026-04-08
+    achieved: 2026-04-08
+  T4:
+    name: xml_to_jsonml() transpiler macro converts XML literals to JSONML output
+    status: achieved
+    value: 5.0
+    cost: 3.0
+    actual_cost: 3.0
+    acceptance:
+    - JSONML transpilation, nested elements, attributes, text children, empty elements, subquery aggregation, BLOB protocol, function registration, transpilation and integration tests
+    context: Achieved 2026-04-05 (v0.12.0). All criteria met.
+    origin: targets.md bootstrap
+    discovered: 2026-04-08
+    achieved: 2026-04-08
