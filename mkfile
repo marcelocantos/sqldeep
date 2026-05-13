@@ -59,10 +59,10 @@ build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqldeep_xml.o build/sql
     $cxx -o $target $inputs $rl_ldflags -lreadline -lz
 
 $lib: build/sqldeep.o
-    libtool -static -o $target $inputs
+    ar rcs $target $inputs
 
 $lib_deepparser: $dp_objs
-    libtool -static -o $target $inputs
+    ar rcs $target $inputs
 
 # ── Compilation rules ────────────────────────────────────────────────
 build/sqldeep.o: dist/sqldeep.cpp dist/sqldeep.h
