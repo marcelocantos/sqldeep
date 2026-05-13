@@ -40,3 +40,19 @@ Licensed under the MIT License.
 See vendor/include/fkYAML/node.LICENSE for the full license text.
 
 Used for: YAML test data loading (test-only dependency, not part of the library).
+
+================================================================================
+
+deepparser (forked from liteparser)
+https://github.com/marcelocantos/deepparser
+Upstream: https://github.com/sqliteai/liteparser
+
+Copyright (c) 2026 Marco Bambini - SQLite AI
+Tokenizer derived from SQLite (public domain).
+Lemon grammar derived from SQLite (public domain).
+See vendor/deepparser/LICENSE for the full upstream license text.
+
+Used for: SQL parsing in the SQLite backends of sqldeep_transpile. Vendored
+as a git submodule under vendor/deepparser/. Sqldeep extensions to the
+grammar (object/array literals, deep SELECT, join arrows, JSON path, XML
+literals, recursive SELECT) are Apache 2.0 © Marcelo Cantos.

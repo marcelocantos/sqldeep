@@ -1,0 +1,3 @@
+[submodule "vendor/deepparser"]
+	path = vendor/deepparser
+	url = git@github.com:marcelocantos/deepparser.git

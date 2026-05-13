@@ -317,6 +317,21 @@ Before 1.0:
   composition with XML BLOBs without type-boundary CAST calls. Needs real-world
   usage to confirm the BLOB protocol round-trips correctly through all SQL
   contexts (views, CTEs, subqueries, language bindings).
+- **Parser migration to deepparser**: The current hand-written recursive-descent
+  parser in `dist/sqldeep.cpp` does partial parsing of surrounding SQL while
+  scanning for sqldeep triggers, which produces latent bugs on exotic SQL forms
+  (e.g. plain-SQL CTEs trigger `unmatched ')'`). The fix is to replace the
+  parser with [deepparser](https://github.com/marcelocantos/deepparser) — a fork
+  of [sqliteai/liteparser](https://github.com/sqliteai/liteparser) extended with
+  sqldeep grammar productions. After migration, the SQLite backends
+  (`SQLDEEP_SQLITE`, `SQLDEEP_SQLITE_VANILLA`) will parse via deepparser's AST,
+  eliminating the partial-parsing bug class. The PostgreSQL backend
+  (`SQLDEEP_POSTGRES`) will remain on the hand-written parser as a **legacy
+  path** until separately migrated — it is currently unused in production and
+  has the same partial-parsing limitations (no plain-SQL CTE support, no window
+  functions, no lateral joins). Migration tracked in
+  [sqldeep T5](bullseye.yaml) and
+  [deepparser T1](vendor/deepparser/bullseye.yaml).
 
 ## Known limitations
 
