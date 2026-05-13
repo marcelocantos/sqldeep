@@ -47,12 +47,15 @@ deepparser (forked from liteparser)
 https://github.com/marcelocantos/deepparser
 Upstream: https://github.com/sqliteai/liteparser
 
-Copyright (c) 2026 Marco Bambini - SQLite AI
+Copyright (c) 2026 SQLite AI
+Copyright (c) 2026 Marcelo Cantos (sqldeep grammar extensions)
+Licensed under the MIT License.
 Tokenizer derived from SQLite (public domain).
 Lemon grammar derived from SQLite (public domain).
-See vendor/deepparser/LICENSE for the full upstream license text.
+See vendor/deepparser/LICENSE for the full license text.
 
 Used for: SQL parsing in the SQLite backends of sqldeep_transpile. Vendored
-as a git submodule under vendor/deepparser/. Sqldeep extensions to the
-grammar (object/array literals, deep SELECT, join arrows, JSON path, XML
-literals, recursive SELECT) are Apache 2.0 © Marcelo Cantos.
+as a git submodule under vendor/deepparser/. Both the upstream parser and
+the sqldeep grammar extensions in the fork are MIT-licensed. Sqldeep itself
+(the consumer) remains Apache 2.0; the MIT/Apache 2.0 boundary is at the
+submodule edge.
