@@ -1,3 +1,4 @@
 [submodule "vendor/deepparser"]
 	path = vendor/deepparser
 	url = https://github.com/marcelocantos/deepparser.git
+	branch = sqldeep-grammar
