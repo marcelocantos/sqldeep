@@ -143,6 +143,53 @@ LpNode *make_column_ref(arena_t *arena, const std::string& column) {
     return n;
 }
 
+LpNode *make_column_ref2(arena_t *arena, const std::string& table,
+                          const std::string& column) {
+    auto *n = new_node(arena, LP_EXPR_COLUMN_REF);
+    if (!n) return nullptr;
+    n->u.column_ref.table  = arena_str(arena, table);
+    n->u.column_ref.column = arena_str(arena, column);
+    return n;
+}
+
+LpNode *make_binop(arena_t *arena, LpBinOp op, LpNode *left, LpNode *right) {
+    auto *n = new_node(arena, LP_EXPR_BINARY_OP);
+    if (!n) return nullptr;
+    n->u.binary.op    = op;
+    n->u.binary.left  = left;
+    n->u.binary.right = right;
+    return n;
+}
+
+// AND together a chain of expressions, left-associative.
+LpNode *and_chain(arena_t *arena, const std::vector<LpNode*>& parts) {
+    if (parts.empty()) return nullptr;
+    LpNode *acc = parts[0];
+    for (size_t i = 1; i < parts.size(); i++)
+        acc = make_binop(arena, LP_OP_AND, acc, parts[i]);
+    return acc;
+}
+
+LpNode *make_from_table(arena_t *arena, const std::string& name,
+                         const std::string& alias) {
+    auto *n = new_node(arena, LP_FROM_TABLE);
+    if (!n) return nullptr;
+    n->u.from_table.name  = arena_str(arena, name);
+    if (!alias.empty()) n->u.from_table.alias = arena_str(arena, alias);
+    return n;
+}
+
+LpNode *make_join(arena_t *arena, LpNode *left, LpNode *right,
+                   LpNode *on_expr) {
+    auto *n = new_node(arena, LP_JOIN_CLAUSE);
+    if (!n) return nullptr;
+    n->u.join.left    = left;
+    n->u.join.right   = right;
+    n->u.join.on_expr = on_expr;
+    /* join_type=0 → INNER JOIN; matches sqldeep's existing emission. */
+    return n;
+}
+
 LpNode *make_function(arena_t *arena, const std::string& name,
                        std::vector<LpNode*> args) {
     auto *n = new_node(arena, LP_EXPR_FUNCTION);
@@ -186,6 +233,7 @@ public:
 
     // Mutate the AST in place. Returns the (possibly new) root node.
     LpNode *transform(LpNode *node) {
+        build_alias_map(node);
         return walk(node, /*depth=*/0, XmlMode::Xml);
     }
 
@@ -193,6 +241,116 @@ private:
     arena_t      *arena_;
     Backend       backend_;
     const FkIndex *fk_index_;
+
+    // alias → underlying table name, collected by a pre-pass over the
+    // entire AST so a sqldeep join path like `c->orders o` can resolve
+    // the leftmost name `c` (an alias from an enclosing FROM clause)
+    // to its real table when building the start-correlation.
+    std::map<std::string, std::string> alias_map_;
+
+    // ── Alias-map prepass ─────────────────────────────────────────
+
+    void build_alias_map(LpNode *node) {
+        if (!node) return;
+        switch (node->kind) {
+            case LP_FROM_TABLE:
+                if (node->u.from_table.alias && node->u.from_table.name)
+                    alias_map_[node->u.from_table.alias] =
+                        node->u.from_table.name;
+                break;
+            case LP_SQLDEEP_JOIN_PATH:
+                for (int i = 0; i < node->u.sqldeep_join_path.steps.count; i++) {
+                    LpNode *s = node->u.sqldeep_join_path.steps.items[i];
+                    if (!s) continue;
+                    if (s->u.sqldeep_join_step.alias && s->u.sqldeep_join_step.table)
+                        alias_map_[s->u.sqldeep_join_step.alias] =
+                            s->u.sqldeep_join_step.table;
+                }
+                build_alias_map(node->u.sqldeep_join_path.prefix);
+                break;
+            default:
+                break;
+        }
+        // Recurse into all child slots that can contain FROM clauses
+        // or further sub-selects.
+        walk_for_aliases(node);
+    }
+
+    void walk_for_aliases(LpNode *node) {
+        switch (node->kind) {
+            case LP_STMT_SELECT:
+                build_alias_map(node->u.select.from);
+                for (int i = 0; i < node->u.select.result_columns.count; i++)
+                    build_alias_map(node->u.select.result_columns.items[i]);
+                for (int i = 0; i < node->u.select.group_by.count; i++)
+                    build_alias_map(node->u.select.group_by.items[i]);
+                build_alias_map(node->u.select.where);
+                build_alias_map(node->u.select.having);
+                for (int i = 0; i < node->u.select.order_by.count; i++)
+                    build_alias_map(node->u.select.order_by.items[i]);
+                build_alias_map(node->u.select.limit);
+                build_alias_map(node->u.select.with);
+                break;
+            case LP_COMPOUND_SELECT:
+                build_alias_map(node->u.compound.left);
+                build_alias_map(node->u.compound.right);
+                break;
+            case LP_RESULT_COLUMN:
+                build_alias_map(node->u.result_column.expr);
+                break;
+            case LP_JOIN_CLAUSE:
+                build_alias_map(node->u.join.left);
+                build_alias_map(node->u.join.right);
+                build_alias_map(node->u.join.on_expr);
+                break;
+            case LP_FROM_SUBQUERY:
+                build_alias_map(node->u.from_subquery.select);
+                break;
+            case LP_EXPR_SUBQUERY:
+                build_alias_map(node->u.subquery.select);
+                break;
+            case LP_EXPR_FUNCTION:
+                for (int i = 0; i < node->u.function.args.count; i++)
+                    build_alias_map(node->u.function.args.items[i]);
+                break;
+            case LP_EXPR_SQLDEEP_OBJECT:
+                for (int i = 0; i < node->u.sqldeep_object.fields.count; i++)
+                    build_alias_map(node->u.sqldeep_object.fields.items[i]);
+                break;
+            case LP_SQLDEEP_FIELD:
+                build_alias_map(node->u.sqldeep_field.value);
+                break;
+            case LP_EXPR_SQLDEEP_ARRAY:
+                for (int i = 0; i < node->u.sqldeep_array.elements.count; i++)
+                    build_alias_map(node->u.sqldeep_array.elements.items[i]);
+                break;
+            case LP_EXPR_SQLDEEP_XML:
+                for (int i = 0; i < node->u.sqldeep_xml.children.count; i++)
+                    build_alias_map(node->u.sqldeep_xml.children.items[i]);
+                for (int i = 0; i < node->u.sqldeep_xml.attrs.count; i++) {
+                    LpNode *a = node->u.sqldeep_xml.attrs.items[i];
+                    if (a) build_alias_map(a->u.sqldeep_xml_attr.value);
+                }
+                break;
+            case LP_WITH:
+                for (int i = 0; i < node->u.with.ctes.count; i++)
+                    build_alias_map(node->u.with.ctes.items[i]);
+                break;
+            case LP_CTE:
+                build_alias_map(node->u.cte.select);
+                break;
+            case LP_STMT_CREATE_VIEW:
+                build_alias_map(node->u.create_view.select);
+                break;
+            default:
+                break;
+        }
+    }
+
+    const std::string& resolve_alias(const std::string& alias) {
+        auto it = alias_map_.find(alias);
+        return (it != alias_map_.end()) ? it->second : alias;
+    }
 
     // Dialect function names ----------------------------------------
 
@@ -597,7 +755,13 @@ private:
             }
         }
 
-        LpNode *cast = make_cast(arena_, base, "TEXT");
+        // Wrap base in a 1-element vector so the canonical unparser
+        // emits `(base)`. The parens preserve the visual disambiguation
+        // (matches sqldeep's pre-existing renderer) and avoid any
+        // operator-precedence surprises inside the CAST argument.
+        LpNode *parens = new_node(arena_, LP_EXPR_VECTOR);
+        list_append(arena_, &parens->u.vector.values, base);
+        LpNode *cast = make_cast(arena_, parens, "TEXT");
         LpNode *path_lit = make_string_lit(arena_, path);
 
         node->kind = LP_EXPR_FUNCTION;
@@ -693,13 +857,243 @@ private:
         return node;
     }
 
-    // SELECT-level handling: singular → LIMIT 1; deep projection wrapping;
-    // FROM-first flag cleared (canonical unparser emits standard order).
+    // ── Join path rewrite ─────────────────────────────────────────
+    //
+    // FROM c->orders o ON|USING ... -> ... AST representation:
+    //   LP_SQLDEEP_JOIN_PATH { prefix, start_alias, steps[] }
+    //
+    // becomes:
+    //   FROM step1.table [alias] JOIN step2.table [alias] ON ... ...
+    //   WHERE step1 ↔ start  (added to the enclosing SELECT)
+
+    struct JoinColumnPair {
+        std::string child_col;
+        std::string parent_col;
+    };
+
+    // Convention-based resolution: child has FK `<parent>_id`,
+    // parent's PK is the same name. FK-guided mode looks up via
+    // fk_index_; ambiguous or missing entries throw.
+    std::vector<JoinColumnPair>
+    resolve_columns(const std::string& child_table,
+                     const std::string& parent_table) {
+        if (!fk_index_) {
+            return {{parent_table + "_id", parent_table + "_id"}};
+        }
+        auto it = fk_index_->find({child_table, parent_table});
+        if (it == fk_index_->end() || it->second.empty()) {
+            throw Error("no foreign key from '" + child_table + "' to '"
+                        + parent_table + "'", 0, 0);
+        }
+        if (it->second.size() > 1) {
+            throw Error("ambiguous foreign key from '" + child_table +
+                        "' to '" + parent_table + "' (" +
+                        std::to_string(it->second.size()) +
+                        " candidates)", 0, 0);
+        }
+        std::vector<JoinColumnPair> out;
+        for (const auto& cp : it->second[0]->columns)
+            out.push_back({cp.from_column, cp.to_column});
+        return out;
+    }
+
+    // Build a chain of LP_FROM_TABLE / LP_JOIN_CLAUSE for the path
+    // and emit the start-correlation WHERE clause into *where_out.
+    // Returns the from-chain node.
+    LpNode *rewrite_join_path(LpNode *jp, LpNode **where_out) {
+        const auto& path = jp->u.sqldeep_join_path;
+        if (path.steps.count == 0) {
+            *where_out = nullptr;
+            return jp;
+        }
+
+        std::string start_alias = path.start_alias ? path.start_alias : "";
+        std::string start_table = resolve_alias(start_alias);
+
+        // First step.
+        LpNode *step1 = path.steps.items[0];
+        const auto& s1 = step1->u.sqldeep_join_step;
+        std::string s1_table = s1.table ? s1.table : "";
+        std::string s1_alias = s1.alias ? s1.alias : "";
+        std::string s1_ref   = s1_alias.empty() ? s1_table : s1_alias;
+
+        // FROM target for the chain.
+        LpNode *chain = make_from_table(arena_, s1_table, s1_alias);
+
+        // WHERE correlation: step1 ↔ start.
+        *where_out = build_join_condition(step1, start_alias, start_table,
+                                           s1_ref, s1_table);
+
+        std::string prev_ref   = s1_ref;
+        std::string prev_table = s1_table;
+
+        // Subsequent steps become JOIN ... ON ....
+        for (int i = 1; i < path.steps.count; i++) {
+            LpNode *step = path.steps.items[i];
+            const auto& s = step->u.sqldeep_join_step;
+            std::string s_table = s.table ? s.table : "";
+            std::string s_alias = s.alias ? s.alias : "";
+            std::string s_ref   = s_alias.empty() ? s_table : s_alias;
+
+            LpNode *table_node = make_from_table(arena_, s_table, s_alias);
+            LpNode *on_expr =
+                build_join_condition(step, prev_ref, prev_table,
+                                      s_ref, s_table);
+            chain = make_join(arena_, chain, table_node, on_expr);
+
+            prev_ref   = s_ref;
+            prev_table = s_table;
+        }
+
+        return chain;
+    }
+
+    // Build the boolean expression connecting two endpoints of a
+    // join-arrow step. `prev` is the left side of the arrow; `curr`
+    // is the right side. forward (`->`) means curr is the child of
+    // prev; reverse (`<-`) means prev is the child of curr.
+    LpNode *build_join_condition(LpNode *step,
+                                  const std::string& prev_ref,
+                                  const std::string& prev_table,
+                                  const std::string& curr_ref,
+                                  const std::string& curr_table) {
+        const auto& s = step->u.sqldeep_join_step;
+
+        // Inline USING (cols): each col → curr.col = prev.col.
+        if (s.using_cols.count > 0) {
+            std::vector<LpNode*> parts;
+            for (int i = 0; i < s.using_cols.count; i++) {
+                LpNode *c = s.using_cols.items[i];
+                if (!c) continue;
+                const char *col = (c->kind == LP_EXPR_COLUMN_REF)
+                                    ? c->u.column_ref.column
+                                    : nullptr;
+                if (!col) continue;
+                parts.push_back(make_binop(arena_, LP_OP_EQ,
+                    make_column_ref2(arena_, curr_ref, col),
+                    make_column_ref2(arena_, prev_ref, col)));
+            }
+            return and_chain(arena_, parts);
+        }
+
+        // Inline ON expression.
+        if (s.on_expr) {
+            return rewrite_on_expr(s.on_expr, s.forward,
+                                    prev_ref, curr_ref);
+        }
+
+        // Convention / FK-guided.
+        std::string child_table  = s.forward ? curr_table : prev_table;
+        std::string parent_table = s.forward ? prev_table : curr_table;
+        auto cols = resolve_columns(child_table, parent_table);
+        std::vector<LpNode*> parts;
+        for (const auto& cp : cols) {
+            if (s.forward) {
+                // curr.child = prev.parent
+                parts.push_back(make_binop(arena_, LP_OP_EQ,
+                    make_column_ref2(arena_, curr_ref, cp.child_col),
+                    make_column_ref2(arena_, prev_ref, cp.parent_col)));
+            } else {
+                // prev.child = curr.parent
+                parts.push_back(make_binop(arena_, LP_OP_EQ,
+                    make_column_ref2(arena_, prev_ref, cp.child_col),
+                    make_column_ref2(arena_, curr_ref, cp.parent_col)));
+            }
+        }
+        return and_chain(arena_, parts);
+    }
+
+    // Re-qualify the bare column refs in an inline ON expression
+    // with the appropriate aliases. Handles:
+    //   - single column ref → "curr.col = prev.col"
+    //   - binary EQ "L = R" → emit "curr.R = prev.L" (forward) or
+    //     "prev.R = curr.L" (reverse). Left side names the parent
+    //     column, right side names the child column.
+    //   - AND of EQs → recurse left/right, combine with AND.
+    LpNode *rewrite_on_expr(LpNode *expr, int forward,
+                             const std::string& prev_ref,
+                             const std::string& curr_ref) {
+        if (!expr) return nullptr;
+
+        if (expr->kind == LP_EXPR_COLUMN_REF) {
+            // Shorthand: same column name in both tables.
+            const char *col = expr->u.column_ref.column;
+            if (!col) return expr;
+            // For forward (curr is child): curr.col = prev.col
+            // For reverse (prev is child): prev.col = curr.col
+            if (forward)
+                return make_binop(arena_, LP_OP_EQ,
+                    make_column_ref2(arena_, curr_ref, col),
+                    make_column_ref2(arena_, prev_ref, col));
+            else
+                return make_binop(arena_, LP_OP_EQ,
+                    make_column_ref2(arena_, prev_ref, col),
+                    make_column_ref2(arena_, curr_ref, col));
+        }
+
+        if (expr->kind == LP_EXPR_BINARY_OP
+            && expr->u.binary.op == LP_OP_AND) {
+            LpNode *l = rewrite_on_expr(expr->u.binary.left, forward,
+                                         prev_ref, curr_ref);
+            LpNode *r = rewrite_on_expr(expr->u.binary.right, forward,
+                                         prev_ref, curr_ref);
+            return make_binop(arena_, LP_OP_AND, l, r);
+        }
+
+        if (expr->kind == LP_EXPR_BINARY_OP
+            && expr->u.binary.op == LP_OP_EQ) {
+            // ON L = R: L names the column on the LEFT side of the
+            // arrow; R names the column on the RIGHT side. The arrow
+            // direction (forward / reverse) determines which side is
+            // the child and which is the parent, but the L→left,
+            // R→right mapping is invariant.
+            //   Forward  (c -> orders): prev=c=left, curr=orders=right
+            //                           emit curr.R = prev.L
+            //   Reverse  (o <- vendors): prev=o=left, curr=vendors=right
+            //                            emit prev.L = curr.R
+            LpNode *L = expr->u.binary.left;
+            LpNode *R = expr->u.binary.right;
+            const char *Lcol = (L && L->kind == LP_EXPR_COLUMN_REF)
+                                  ? L->u.column_ref.column : nullptr;
+            const char *Rcol = (R && R->kind == LP_EXPR_COLUMN_REF)
+                                  ? R->u.column_ref.column : nullptr;
+            if (Lcol && Rcol) {
+                if (forward)
+                    return make_binop(arena_, LP_OP_EQ,
+                        make_column_ref2(arena_, curr_ref, Rcol),
+                        make_column_ref2(arena_, prev_ref, Lcol));
+                else
+                    return make_binop(arena_, LP_OP_EQ,
+                        make_column_ref2(arena_, prev_ref, Lcol),
+                        make_column_ref2(arena_, curr_ref, Rcol));
+            }
+        }
+
+        return expr;  // fallback: leave as-is
+    }
+
+    // SELECT-level handling: join path expansion, singular → LIMIT 1,
+    // deep projection wrapping. The from_first flag is also cleared
+    // here because canonical unparser emits standard SELECT-FROM order.
     LpNode *rewrite_select(LpNode *node) {
-        // The from_first flag was a parser convenience; the unparser
-        // does NOT emit FROM-first in canonical output. Clear it so
-        // the output reads as standard SQL.
         node->u.select.sqldeep_from_first = 0;
+
+        // Expand a sqldeep join path in the FROM clause into a
+        // standard FROM_TABLE / JOIN_CLAUSE chain plus an AND-ed
+        // start-correlation predicate added to the WHERE clause.
+        if (node->u.select.from
+            && node->u.select.from->kind == LP_SQLDEEP_JOIN_PATH) {
+            LpNode *jp = node->u.select.from;
+            LpNode *extra_where = nullptr;
+            LpNode *chain = rewrite_join_path(jp, &extra_where);
+            node->u.select.from = chain;
+            if (extra_where) {
+                node->u.select.where = node->u.select.where
+                    ? make_binop(arena_, LP_OP_AND,
+                                  extra_where, node->u.select.where)
+                    : extra_where;
+            }
+        }
 
         bool was_singular = node->u.select.sqldeep_singular;
 
@@ -761,7 +1155,10 @@ private:
 
         bool is_obj = std::strcmp(pname, fn_object()) == 0;
         bool is_arr = std::strcmp(pname, fn_array()) == 0;
-        if (!is_obj && !is_arr) return node;
+        bool is_xml = std::strcmp(pname, "xml_element") == 0
+                    || std::strcmp(pname, "xml_element_jsx") == 0
+                    || std::strcmp(pname, "xml_element_jsonml") == 0;
+        if (!is_obj && !is_arr && !is_xml) return node;
 
         // Helper: set the projection back.
         auto replace_projection = [&](LpNode *new_expr) {
@@ -775,9 +1172,6 @@ private:
         // XML element (i.e. <ul>{SELECT <li/> FROM t}</ul>) gets
         // wrapped in the corresponding {xml,jsx,jsonml}_agg helper so
         // rows aggregate into one XML fragment.
-        bool is_xml = std::strcmp(pname, "xml_element") == 0
-                    || std::strcmp(pname, "xml_element_jsx") == 0
-                    || std::strcmp(pname, "xml_element_jsonml") == 0;
         if (is_xml) {
             LpNode *parent = node->parent;
             if (!parent || parent->kind != LP_EXPR_SUBQUERY) return node;
@@ -791,14 +1185,25 @@ private:
         }
 
         if (is_obj) {
-            // Object wrap requires aggregating-context grandparent.
+            // Object wrap fires when the SELECT is a value-subquery in
+            // an aggregating sqldeep context (object field value, array
+            // element, IN-list value). LP_EXPR_IN holds its inner
+            // select directly without an LP_EXPR_SUBQUERY wrapper, so
+            // both paths are checked.
             LpNode *parent = node->parent;
-            if (!parent || parent->kind != LP_EXPR_SUBQUERY) return node;
-            LpNode *gp = parent->parent;
-            if (!gp) return node;
-            if (gp->kind != LP_SQLDEEP_FIELD &&
-                gp->kind != LP_EXPR_SQLDEEP_ARRAY &&
-                gp->kind != LP_EXPR_IN) return node;
+            if (!parent) return node;
+            bool wrap = false;
+            if (parent->kind == LP_EXPR_IN) {
+                wrap = true;
+            } else if (parent->kind == LP_EXPR_SUBQUERY) {
+                LpNode *gp = parent->parent;
+                if (gp && (gp->kind == LP_SQLDEEP_FIELD
+                        || gp->kind == LP_EXPR_SQLDEEP_ARRAY
+                        || gp->kind == LP_EXPR_IN)) {
+                    wrap = true;
+                }
+            }
+            if (!wrap) return node;
             replace_projection(make_function(arena_, fn_group_array(), {proj}));
             return node;
         }
