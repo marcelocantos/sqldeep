@@ -46,19 +46,20 @@ test_objs = $[patsubst %.cpp,build/%.o,$test_srcs]
     rm -rf build/ .mk/
 
 # ── Binaries ─────────────────────────────────────────────────────────
-# Tests link sqlite3 for integration tests; the library itself does not.
-# Deepparser objects are linked in so compile errors surface in `mk test`,
-# but no sqldeep code consumes them yet (stage 1: vendor + build only).
+# sqldeep.cpp calls deepparser's lp_parse_all / lp_ast_to_sql, so every
+# consumer (tests, demo, CLI, library) links the deepparser objects.
+# libsqldeep.a bundles them directly so downstream callers only need a
+# single -lsqldeep on their link line.
 build/sqldeep_tests: $test_objs build/sqldeep.o build/sqldeep_xml.o build/sqlite3.o $lib_deepparser
     $cxx $cxxflags -o $target $inputs
 
-build/demo: build/examples/demo.o build/sqldeep.o
+build/demo: build/examples/demo.o build/sqldeep.o $lib_deepparser
     $cxx $cxxflags -o $target $inputs
 
-build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqldeep_xml.o build/sqlite3.o
+build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqldeep_xml.o build/sqlite3.o $lib_deepparser
     $cxx -o $target $inputs $rl_ldflags -lreadline -lz
 
-$lib: build/sqldeep.o
+$lib: build/sqldeep.o $dp_objs
     ar rcs $target $inputs
 
 $lib_deepparser: $dp_objs
@@ -66,7 +67,7 @@ $lib_deepparser: $dp_objs
 
 # ── Compilation rules ────────────────────────────────────────────────
 build/sqldeep.o: dist/sqldeep.cpp dist/sqldeep.h
-    $cxx $cxxflags $incflags -c $input -o $target
+    $cxx $cxxflags $incflags $dp_incflags -c $input -o $target
 
 build/sqldeep_xml.o: dist/sqldeep_xml.c dist/sqldeep_xml.h
     $cc -w $incflags -c $input -o $target
