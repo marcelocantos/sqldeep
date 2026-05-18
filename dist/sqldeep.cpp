@@ -18,7 +18,9 @@ extern "C" {
 #include "arena.h"
 }
 
+#include <climits>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -254,17 +256,24 @@ private:
         if (!node) return;
         switch (node->kind) {
             case LP_FROM_TABLE:
-                if (node->u.from_table.alias && node->u.from_table.name)
-                    alias_map_[node->u.from_table.alias] =
-                        node->u.from_table.name;
+                if (node->u.from_table.name) {
+                    /* Use alias if given, else map the table to itself
+                     * so unqualified table names also resolve. */
+                    const char *key = node->u.from_table.alias
+                                       ? node->u.from_table.alias
+                                       : node->u.from_table.name;
+                    alias_map_[key] = node->u.from_table.name;
+                }
                 break;
             case LP_SQLDEEP_JOIN_PATH:
                 for (int i = 0; i < node->u.sqldeep_join_path.steps.count; i++) {
                     LpNode *s = node->u.sqldeep_join_path.steps.items[i];
                     if (!s) continue;
-                    if (s->u.sqldeep_join_step.alias && s->u.sqldeep_join_step.table)
-                        alias_map_[s->u.sqldeep_join_step.alias] =
-                            s->u.sqldeep_join_step.table;
+                    const auto& ss = s->u.sqldeep_join_step;
+                    if (ss.table) {
+                        const char *key = ss.alias ? ss.alias : ss.table;
+                        alias_map_[key] = ss.table;
+                    }
                 }
                 build_alias_map(node->u.sqldeep_join_path.prefix);
                 break;
@@ -440,6 +449,15 @@ private:
         if (!node) return nullptr;
         if (depth > kMaxNestingDepth)
             throw Error("maximum nesting depth exceeded", 0, 0);
+
+        // Recursive SELECT (sqldeep_recurse) is handled pre-order:
+        // the whole statement is rewritten into a WITH RECURSIVE
+        // 3-CTE construction so we don't want the post-order walk
+        // to start rewriting the object literal projection (its
+        // recursive-children marker still needs reading).
+        if (node->kind == LP_STMT_SELECT && node->u.select.sqldeep_recurse) {
+            return rewrite_recursive_select(node);
+        }
 
         // jsx(<el/>) / jsonml(<el/>) transpiler-macro wrapper: absorb
         // the outer function call and switch the inner XML element's
@@ -692,7 +710,15 @@ private:
                     args.push_back(wrap_json_bool(v));
                     break;
                 }
-                case 4:  // recursive children — handled by RECURSE expansion
+                case 4:  // recursive children
+                    // `children: *` only has meaning inside a SELECT
+                    // that has a RECURSE clause — when we get here in
+                    // the post-order walk, the recursive-SELECT
+                    // pre-handler already short-circuited that case.
+                    // Reaching this branch means the recursive field
+                    // appeared without RECURSE; surface as an error.
+                    throw Error("`*` recursive child field requires "
+                                "a RECURSE clause on the SELECT", 0, 0);
                 default:
                     break;
             }
@@ -772,6 +798,60 @@ private:
         return node;
     }
 
+    // Multi-line XML text dedent: scan immediate text children for
+    // the common leading-whitespace prefix on each line after a '\n'.
+    // Blank-interior lines (only whitespace between two newlines) are
+    // skipped from the indent calculation but still trimmed on output.
+    int xml_min_indent(LpNode *node) {
+        int min_indent = INT_MAX;
+        const auto& x = node->u.sqldeep_xml;
+        for (int j = 0; j < x.children.count; j++) {
+            LpNode *c = x.children.items[j];
+            if (!c || c->kind != LP_SQLDEEP_XML_TEXT) continue;
+            const char *text = c->u.sqldeep_xml_text.text;
+            if (!text) continue;
+            size_t i = 0, n = std::strlen(text);
+            while (i < n) {
+                const char *nl = (const char *)std::memchr(text + i, '\n', n - i);
+                if (!nl) break;
+                size_t ls = (nl - text) + 1;
+                int sp = 0;
+                while (ls + sp < n && text[ls + sp] == ' ') ++sp;
+                // Skip only fully-blank interior lines (whitespace
+                // between two newlines). Lines whose only "content"
+                // is whitespace before a child element or closing tag
+                // (the text-end case) still carry meaningful indent.
+                if (ls + sp < n && text[ls + sp] == '\n') {
+                    i = ls; continue;
+                }
+                if (sp < min_indent) min_indent = sp;
+                i = ls + sp + 1;
+            }
+        }
+        return min_indent == INT_MAX ? 0 : min_indent;
+    }
+
+    // Apply dedent: drop `indent` spaces immediately after every '\n'
+    // in `text`. Returns a new arena-owned string.
+    char *xml_dedent_text(const char *text, int indent) {
+        if (!text || indent <= 0)
+            return arena_strdup(arena_, text ? text : "");
+        size_t n = std::strlen(text);
+        std::string out;
+        out.reserve(n);
+        for (size_t i = 0; i < n; ) {
+            char c = text[i++];
+            out += c;
+            if (c == '\n') {
+                int dropped = 0;
+                while (dropped < indent && i < n && text[i] == ' ') {
+                    i++; dropped++;
+                }
+            }
+        }
+        return arena_strdup(arena_, out.c_str());
+    }
+
     // <tag attrs>body</tag> →
     //   xml_element('tag', xml_attrs(...), child1, child2, ...)
     // Self-closing <tag/> uses 'tag/' as the literal string so the
@@ -835,16 +915,23 @@ private:
             args.push_back(make_function(arena_, fn_attrs, attr_args));
         }
 
-        // children: text → string literal; nested element → recurse
-        // (already rewritten in post-order); anything else is an
-        // interpolation expression, with bool wrap applied.
+        // Multi-line dedent: scan all direct-text children for the
+        // common leading-whitespace indent, then strip that indent
+        // from each line's start. Source indentation produces the
+        // relative indentation in the rendered output.
+        int indent = xml_min_indent(node);
+
+        // children: text → string literal (dedented); nested element
+        // → recurse (already rewritten in post-order); anything else
+        // is an interpolation expression, with bool wrap applied.
         for (int i = 0; i < x.children.count; i++) {
             LpNode *c = x.children.items[i];
             if (!c) continue;
             if (c->kind == LP_SQLDEEP_XML_TEXT) {
-                args.push_back(make_string_lit(
-                    arena_, c->u.sqldeep_xml_text.text
-                              ? c->u.sqldeep_xml_text.text : ""));
+                const char *raw = c->u.sqldeep_xml_text.text;
+                char *dedented = xml_dedent_text(raw, indent);
+                args.push_back(make_string_lit(arena_,
+                    dedented ? std::string(dedented) : std::string("")));
             } else {
                 args.push_back(wrap_json_bool(c));
             }
@@ -856,6 +943,194 @@ private:
         for (auto *a : args) list_append(arena_, &node->u.function.args, a);
         return node;
     }
+
+    // ── Recursive SELECT rewrite ──────────────────────────────────
+    //
+    // Expands
+    //   SELECT { id, name, children: * } FROM t RECURSE ON (fk [= pk]) WHERE ...
+    // into the 3-CTE bracket-injection template documented in
+    // sqldeep's CLAUDE.md (DFS traversal, per-node JSON object, then
+    // event fragments concatenated to form one nested JSON string).
+    //
+    // Because the WITH RECURSIVE shape is large and well-defined, we
+    // build it as SQL text and re-parse via deepparser to obtain the
+    // standard SQL AST. The transformer then returns the new AST in
+    // place of the original SELECT.
+
+    LpNode *rewrite_recursive_select(LpNode *node) {
+        const auto& sel = node->u.select;
+        LpNode *recurse = sel.sqldeep_recurse;
+        if (!recurse) return node;
+
+        std::string fk_col = recurse->u.sqldeep_recurse.fk_col
+                                ? recurse->u.sqldeep_recurse.fk_col : "";
+        std::string pk_col = recurse->u.sqldeep_recurse.pk_col
+                                ? recurse->u.sqldeep_recurse.pk_col : "id";
+
+        // The FROM target must be a plain LP_FROM_TABLE.
+        if (!sel.from || sel.from->kind != LP_FROM_TABLE) {
+            throw Error("RECURSE requires a single FROM table", 0, 0);
+        }
+        std::string table = sel.from->u.from_table.name
+                              ? sel.from->u.from_table.name : "";
+
+        // Projection must be a sqldeep object literal with a recursive
+        // children field. Extract field info.
+        if (sel.result_columns.count != 1) {
+            throw Error("RECURSE requires a single object projection", 0, 0);
+        }
+        LpNode *rc = sel.result_columns.items[0];
+        LpNode *proj = (rc && rc->kind == LP_RESULT_COLUMN)
+                          ? rc->u.result_column.expr : rc;
+        if (!proj || proj->kind != LP_EXPR_SQLDEEP_OBJECT) {
+            throw Error("RECURSE requires a sqldeep object projection",
+                        0, 0);
+        }
+
+        std::string children_field;
+        std::vector<std::string> field_keys;   // column-name used in CTE
+        std::vector<std::string> obj_pairs;    // "'key', expr" for json_object
+        for (int i = 0; i < proj->u.sqldeep_object.fields.count; i++) {
+            LpNode *f = proj->u.sqldeep_object.fields.items[i];
+            if (!f) continue;
+            const auto& sf = f->u.sqldeep_field;
+            if (sf.key_form == 4) {           // recursive children marker
+                children_field = sf.key_text ? sf.key_text : "children";
+                continue;
+            }
+            // Only bare and qualified-bare are supported here — those
+            // are the forms that map cleanly to "include this column
+            // in the DFS CTE column list".
+            std::string col = sf.key_text ? sf.key_text : "";
+            field_keys.push_back(col);
+            obj_pairs.push_back("'" + sql_escape_lit(col) + "', " + col);
+        }
+        if (children_field.empty()) {
+            throw Error("RECURSE requires a `children: *` field in the "
+                        "projection", 0, 0);
+        }
+
+        // Root condition (the SELECT's WHERE clause); we emit it back
+        // into the anchor leg of the recursive CTE. The canonical
+        // unparser produces the SQL text.
+        std::string root_where;
+        if (sel.where) {
+            char *w = lp_ast_to_sql(sel.where, transient_arena());
+            if (w) root_where = w;
+        }
+
+        bool singular = !!sel.sqldeep_singular;
+        bool is_pg = (backend_ == Backend::postgres);
+
+        // Build column list. The CTE always includes fk_col; pk_col
+        // is added separately when it differs from fk_col and isn't
+        // already in the field list.
+        std::string col_list;
+        std::string col_select;  // "c.col1, c.col2, ..." for recursive step
+        for (size_t i = 0; i < field_keys.size(); i++) {
+            if (i > 0) { col_list += ", "; col_select += ", "; }
+            col_list += field_keys[i];
+            col_select += "c." + field_keys[i];
+        }
+        if (!field_keys.empty()) { col_list += ", "; col_select += ", "; }
+        col_list += fk_col;
+        col_select += "c." + fk_col;
+        bool pk_in_fields = false;
+        for (const auto& f : field_keys)
+            if (f == pk_col) { pk_in_fields = true; break; }
+        if (pk_col != fk_col && !pk_in_fields) {
+            col_list += ", " + pk_col;
+            col_select += ", c." + pk_col;
+        }
+
+        std::string pad   = is_pg
+            ? "lpad(CAST(" + pk_col + " AS text), 10, '0')"
+            : "printf('%010d', " + pk_col + ")";
+        std::string c_pad = is_pg
+            ? "lpad(CAST(c." + pk_col + " AS text), 10, '0')"
+            : "printf('%010d', c." + pk_col + ")";
+        std::string concat_fn = is_pg
+            ? "string_agg(_fragment, '' ORDER BY _sort_key)"
+            : "group_concat(_fragment, '')";
+        std::string high_char = is_pg ? "chr(127)" : "char(127)";
+
+        // Build the obj_args for fn_object call.
+        std::string obj_args;
+        for (size_t i = 0; i < obj_pairs.size(); i++) {
+            if (i > 0) obj_args += ", ";
+            obj_args += obj_pairs[i];
+        }
+
+        std::string out;
+        out += "WITH RECURSIVE _sdq_dfs(";
+        out += col_list;
+        out += ", _depth, _path) AS (SELECT ";
+        out += col_list;
+        out += ", 0, ";
+        out += pad;
+        out += " FROM ";
+        out += table;
+        if (!root_where.empty()) {
+            out += " WHERE ";
+            out += root_where;
+        }
+        out += " UNION ALL SELECT ";
+        out += col_select;
+        out += ", d._depth + 1, d._path || '/' || ";
+        out += c_pad;
+        out += " FROM ";
+        out += table;
+        out += " c JOIN _sdq_dfs d ON c.";
+        out += fk_col;
+        out += " = d.";
+        out += pk_col;
+        out += "), _sdq_ranked AS (SELECT *, ";
+        out += fn_object();
+        out += "(";
+        out += obj_args;
+        out += ") AS _obj, ROW_NUMBER() OVER (PARTITION BY ";
+        out += fk_col;
+        out += " ORDER BY ";
+        out += pk_col;
+        out += ") AS _child_rank FROM _sdq_dfs), ";
+        out += "_sdq_events(_sort_key, _fragment) AS (SELECT _path, ";
+        out += "CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || ";
+        out += "substr(_obj, 1, length(_obj) - 1) || ',\"";
+        out += sql_escape_lit(children_field);
+        out += "\":[' FROM _sdq_ranked UNION ALL SELECT _path || ";
+        out += high_char;
+        out += ", ']}' FROM _sdq_ranked) SELECT ";
+        if (!singular) out += "'[' || ";
+        out += concat_fn;
+        if (!singular) out += " || ']'";
+        out += " FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)";
+
+        // Re-parse the constructed SQL via deepparser so we hand back
+        // a standard SQL AST. (Re-using deepparser this way costs one
+        // extra parse but spares us building a multi-CTE AST by hand.)
+        const char *err = nullptr;
+        LpNode *new_ast = lp_parse(out.c_str(), arena_, &err);
+        if (!new_ast) {
+            std::string msg = err ? err : "internal: recursive expansion failed";
+            throw Error(msg, 0, 0);
+        }
+        return new_ast;
+    }
+
+    // Helper: escape single quotes in a string for a SQL string literal.
+    static std::string sql_escape_lit(const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    }
+
+    // The recursive-SELECT rewrite needs to emit the existing WHERE
+    // clause as SQL text. The transient arena is just the regular
+    // arena — it owns those strings for the lifetime of the parse.
+    arena_t *transient_arena() { return arena_; }
 
     // ── Join path rewrite ─────────────────────────────────────────
     //
@@ -908,7 +1183,15 @@ private:
         }
 
         std::string start_alias = path.start_alias ? path.start_alias : "";
-        std::string start_table = resolve_alias(start_alias);
+        // The leftmost name must refer to a table or alias already in
+        // scope (from an outer FROM clause or another step). Unknown
+        // names are sqldeep errors — there's no implicit "anything
+        // goes" auto-join base.
+        auto it = alias_map_.find(start_alias);
+        if (it == alias_map_.end()) {
+            throw Error("unknown join alias '" + start_alias + "'", 0, 0);
+        }
+        std::string start_table = it->second;
 
         // First step.
         LpNode *step1 = path.steps.items[0];
@@ -1224,12 +1507,29 @@ std::string transpile_impl(const std::string& input,
     arena_t *arena = arena_create(64 * 1024);
     if (!arena) throw Error("out of memory", 0, 0);
 
+    // Try to parse as a sequence of statements. If that fails, the
+    // input may be a bare expression — sqldeep historically accepted
+    // those (e.g. `<div/>`, `{a, b}`) directly. Wrap it as a one-
+    // column SELECT, transform, then strip the SELECT framing so the
+    // caller still sees just the expression.
     const char *parse_err = nullptr;
     LpNodeList *stmts = lp_parse_all(input.c_str(), arena, &parse_err);
+    bool bare_expr = false;
     if (!stmts) {
-        std::string msg = parse_err ? parse_err : "parse error";
-        arena_destroy(arena);
-        throw Error(msg, 0, 0);
+        std::string wrapped = "SELECT " + input;
+        const char *err2 = nullptr;
+        stmts = lp_parse_all(wrapped.c_str(), arena, &err2);
+        if (!stmts) {
+            std::string msg = parse_err ? parse_err
+                              : (err2 ? err2 : "parse error");
+            // Deepparser formats errors as "LINE:COL: message"; parse
+            // out the position so callers can highlight the source.
+            int line = 0, col = 0;
+            (void)std::sscanf(msg.c_str(), "%d:%d", &line, &col);
+            arena_destroy(arena);
+            throw Error(msg, line, col);
+        }
+        bare_expr = true;
     }
 
     FkIndex fk_index;
@@ -1239,8 +1539,6 @@ std::string transpile_impl(const std::string& input,
         Transformer t(arena, backend, fks ? &fk_index : nullptr);
         for (int i = 0; i < stmts->count; i++) {
             stmts->items[i] = t.transform(stmts->items[i]);
-            // Re-fix parent pointers since some children may have been
-            // mutated and new nodes inserted.
             if (stmts->items[i]) lp_fix_parents(stmts->items[i]);
         }
     } catch (...) {
@@ -1248,12 +1546,27 @@ std::string transpile_impl(const std::string& input,
         throw;
     }
 
-    // Stitch all statements together separated by "; ".
     std::string out;
-    for (int i = 0; i < stmts->count; i++) {
-        if (i > 0) out += "; ";
-        char *sql = lp_ast_to_sql(stmts->items[i], arena);
-        if (sql) out += sql;
+    if (bare_expr && stmts->count == 1) {
+        // Extract just the single result-column expression so the
+        // caller sees the bare transformed form.
+        LpNode *sel = stmts->items[0];
+        if (sel && sel->kind == LP_STMT_SELECT
+            && sel->u.select.result_columns.count == 1) {
+            LpNode *rc = sel->u.select.result_columns.items[0];
+            LpNode *expr = (rc && rc->kind == LP_RESULT_COLUMN)
+                              ? rc->u.result_column.expr : rc;
+            if (expr) {
+                char *sql = lp_ast_to_sql(expr, arena);
+                if (sql) out = sql;
+            }
+        }
+    } else {
+        for (int i = 0; i < stmts->count; i++) {
+            if (i > 0) out += "; ";
+            char *sql = lp_ast_to_sql(stmts->items[i], arena);
+            if (sql) out += sql;
+        }
     }
 
     arena_destroy(arena);
