@@ -173,6 +173,12 @@ LpNode *make_limit(arena_t *arena, int count) {
 
 constexpr int kMaxNestingDepth = 200;
 
+// XML emission flavour. JSX and JSONML are sqldeep transpiler macros
+// — `jsx(<el/>)` / `jsonml(<el/>)` — that select alternative XML
+// helper function names (xml_element_jsx, xml_attrs_jsx, jsx_agg vs.
+// the plain xml_* family).
+enum class XmlMode { Xml, Jsx, Jsonml };
+
 class Transformer {
 public:
     Transformer(arena_t *arena, Backend backend, const FkIndex *fk_index)
@@ -180,7 +186,7 @@ public:
 
     // Mutate the AST in place. Returns the (possibly new) root node.
     LpNode *transform(LpNode *node) {
-        return walk(node, /*depth=*/0);
+        return walk(node, /*depth=*/0, XmlMode::Xml);
     }
 
 private:
@@ -211,6 +217,60 @@ private:
             default:                      return "sqldeep_json_group_array";
         }
     }
+    // BLOB-protocol wrapper used to inject a typed JSON value into a
+    // JSON-building call so booleans (and only booleans, currently)
+    // round-trip as `true` / `false` rather than `1` / `0`. Postgres
+    // jsonb already has a native bool, so no wrapper is needed there.
+    const char *fn_json_blob() const {
+        switch (backend_) {
+            case Backend::postgres:       return nullptr;
+            case Backend::sqlite_vanilla: return "json";
+            default:                      return "sqldeep_json";
+        }
+    }
+
+    // Detect a bare `true` / `false` literal used as a value. SQLite's
+    // grammar doesn't have boolean keywords — `true`/`false` parse as
+    // identifier column refs (with no table qualifier). Returns the
+    // canonical lower-case form, or NULL if `expr` isn't one of those.
+    static const char *bool_literal_text(LpNode *expr) {
+        if (!expr) return nullptr;
+        const char *name = nullptr;
+        if (expr->kind == LP_EXPR_LITERAL_BOOL) {
+            name = expr->u.literal.value;
+        } else if (expr->kind == LP_EXPR_COLUMN_REF
+                && !expr->u.column_ref.schema
+                && !expr->u.column_ref.table) {
+            name = expr->u.column_ref.column;
+        }
+        if (!name) return nullptr;
+        if ((name[0] == 't' || name[0] == 'T')
+            && (name[1] == 'r' || name[1] == 'R')
+            && (name[2] == 'u' || name[2] == 'U')
+            && (name[3] == 'e' || name[3] == 'E')
+            && name[4] == '\0')
+            return "true";
+        if ((name[0] == 'f' || name[0] == 'F')
+            && (name[1] == 'a' || name[1] == 'A')
+            && (name[2] == 'l' || name[2] == 'L')
+            && (name[3] == 's' || name[3] == 'S')
+            && (name[4] == 'e' || name[4] == 'E')
+            && name[5] == '\0')
+            return "false";
+        return nullptr;
+    }
+
+    // Wrap a bare `true` / `false` literal in fn_json('true') /
+    // fn_json('false') when it appears in a JSON value slot — object
+    // field value, array element, or (later) XML attribute value.
+    // No wrap in Postgres mode (jsonb has native bool).
+    LpNode *wrap_json_bool(LpNode *expr) {
+        const char *lit = bool_literal_text(expr);
+        if (!lit) return expr;
+        const char *fn = fn_json_blob();
+        if (!fn) return expr;
+        return make_function(arena_, fn, {make_string_lit(arena_, lit)});
+    }
 
     // ── Walker ────────────────────────────────────────────────────
     //
@@ -218,17 +278,38 @@ private:
     // itself. By the time we rewrite a sqldeep node, its children are
     // already plain-SQL AST.
 
-    LpNode *walk(LpNode *node, int depth) {
+    LpNode *walk(LpNode *node, int depth, XmlMode mode) {
         if (!node) return nullptr;
         if (depth > kMaxNestingDepth)
             throw Error("maximum nesting depth exceeded", 0, 0);
 
-        walk_children(node, depth + 1);
+        // jsx(<el/>) / jsonml(<el/>) transpiler-macro wrapper: absorb
+        // the outer function call and switch the inner XML element's
+        // emission mode. Detected pre-recursion so the mode propagates
+        // down through nested XML children.
+        if (node->kind == LP_EXPR_FUNCTION
+            && node->u.function.name
+            && node->u.function.args.count == 1
+            && node->u.function.args.items[0]
+            && node->u.function.args.items[0]->kind == LP_EXPR_SQLDEEP_XML) {
+            XmlMode m = XmlMode::Xml;
+            const char *fn = node->u.function.name;
+            if (std::strcmp(fn, "jsx") == 0)        m = XmlMode::Jsx;
+            else if (std::strcmp(fn, "jsonml") == 0) m = XmlMode::Jsonml;
+            if (m != XmlMode::Xml) {
+                LpNode *xml = node->u.function.args.items[0];
+                walk_xml_children(xml, depth + 1, m);
+                return rewrite_xml(xml, m);
+            }
+        }
+
+        walk_children(node, depth + 1, mode);
 
         switch (node->kind) {
             case LP_EXPR_SQLDEEP_OBJECT:    return rewrite_object(node);
             case LP_EXPR_SQLDEEP_ARRAY:     return rewrite_array(node);
             case LP_EXPR_SQLDEEP_JSON_PATH: return rewrite_json_path(node);
+            case LP_EXPR_SQLDEEP_XML:       return rewrite_xml(node, mode);
             case LP_STMT_SELECT:            return rewrite_select(node);
             default:                        return node;
         }
@@ -240,115 +321,192 @@ private:
     // those children here. Anything that's a leaf (literals, naked
     // column refs, identifiers) has nothing to do.
 
-    void walk_children(LpNode *node, int depth) {
+    void walk_children(LpNode *node, int depth, XmlMode mode) {
         switch (node->kind) {
             case LP_STMT_SELECT:
-                walk_list(&node->u.select.result_columns, depth);
-                node->u.select.from   = walk(node->u.select.from, depth);
-                node->u.select.where  = walk(node->u.select.where, depth);
-                walk_list(&node->u.select.group_by, depth);
-                node->u.select.having = walk(node->u.select.having, depth);
-                walk_list(&node->u.select.order_by, depth);
-                node->u.select.limit  = walk(node->u.select.limit, depth);
-                walk_list(&node->u.select.window_defs, depth);
-                node->u.select.with   = walk(node->u.select.with, depth);
+                walk_list(&node->u.select.result_columns, depth, mode);
+                node->u.select.from   = walk(node->u.select.from, depth, mode);
+                node->u.select.where  = walk(node->u.select.where, depth, mode);
+                walk_list(&node->u.select.group_by, depth, mode);
+                node->u.select.having = walk(node->u.select.having, depth, mode);
+                walk_list(&node->u.select.order_by, depth, mode);
+                node->u.select.limit  = walk(node->u.select.limit, depth, mode);
+                walk_list(&node->u.select.window_defs, depth, mode);
+                node->u.select.with   = walk(node->u.select.with, depth, mode);
                 break;
             case LP_COMPOUND_SELECT:
-                node->u.compound.left  = walk(node->u.compound.left, depth);
-                node->u.compound.right = walk(node->u.compound.right, depth);
+                node->u.compound.left  = walk(node->u.compound.left, depth, mode);
+                node->u.compound.right = walk(node->u.compound.right, depth, mode);
                 break;
             case LP_RESULT_COLUMN:
                 node->u.result_column.expr =
-                    walk(node->u.result_column.expr, depth);
+                    walk(node->u.result_column.expr, depth, mode);
                 break;
             case LP_EXPR_BINARY_OP:
-                node->u.binary.left  = walk(node->u.binary.left, depth);
-                node->u.binary.right = walk(node->u.binary.right, depth);
+                node->u.binary.left  = walk(node->u.binary.left, depth, mode);
+                node->u.binary.right = walk(node->u.binary.right, depth, mode);
                 break;
             case LP_EXPR_UNARY_OP:
-                node->u.unary.operand = walk(node->u.unary.operand, depth);
+                node->u.unary.operand = walk(node->u.unary.operand, depth, mode);
                 break;
             case LP_EXPR_FUNCTION:
-                walk_list(&node->u.function.args, depth);
-                walk_list(&node->u.function.order_by, depth);
-                node->u.function.filter = walk(node->u.function.filter, depth);
-                node->u.function.over   = walk(node->u.function.over, depth);
+                walk_list(&node->u.function.args, depth, mode);
+                walk_list(&node->u.function.order_by, depth, mode);
+                node->u.function.filter = walk(node->u.function.filter, depth, mode);
+                node->u.function.over   = walk(node->u.function.over, depth, mode);
                 break;
             case LP_EXPR_CAST:
-                node->u.cast.expr = walk(node->u.cast.expr, depth);
+                node->u.cast.expr = walk(node->u.cast.expr, depth, mode);
                 break;
             case LP_EXPR_COLLATE:
-                node->u.collate.expr = walk(node->u.collate.expr, depth);
+                node->u.collate.expr = walk(node->u.collate.expr, depth, mode);
                 break;
             case LP_EXPR_BETWEEN:
-                node->u.between.expr = walk(node->u.between.expr, depth);
-                node->u.between.low  = walk(node->u.between.low, depth);
-                node->u.between.high = walk(node->u.between.high, depth);
+                node->u.between.expr = walk(node->u.between.expr, depth, mode);
+                node->u.between.low  = walk(node->u.between.low, depth, mode);
+                node->u.between.high = walk(node->u.between.high, depth, mode);
                 break;
             case LP_EXPR_IN:
-                node->u.in.expr   = walk(node->u.in.expr, depth);
-                node->u.in.select = walk(node->u.in.select, depth);
-                walk_list(&node->u.in.values, depth);
+                node->u.in.expr   = walk(node->u.in.expr, depth, mode);
+                node->u.in.select = walk(node->u.in.select, depth, mode);
+                walk_list(&node->u.in.values, depth, mode);
                 break;
             case LP_EXPR_EXISTS:
-                node->u.exists.select = walk(node->u.exists.select, depth);
+                node->u.exists.select = walk(node->u.exists.select, depth, mode);
                 break;
             case LP_EXPR_SUBQUERY:
-                node->u.subquery.select = walk(node->u.subquery.select, depth);
+                node->u.subquery.select = walk(node->u.subquery.select, depth, mode);
                 break;
             case LP_EXPR_CASE:
-                node->u.case_.operand = walk(node->u.case_.operand, depth);
-                walk_list(&node->u.case_.when_exprs, depth);
-                node->u.case_.else_expr = walk(node->u.case_.else_expr, depth);
+                node->u.case_.operand = walk(node->u.case_.operand, depth, mode);
+                walk_list(&node->u.case_.when_exprs, depth, mode);
+                node->u.case_.else_expr = walk(node->u.case_.else_expr, depth, mode);
                 break;
             case LP_FROM_SUBQUERY:
                 node->u.from_subquery.select =
-                    walk(node->u.from_subquery.select, depth);
+                    walk(node->u.from_subquery.select, depth, mode);
                 break;
             case LP_JOIN_CLAUSE:
-                node->u.join.left    = walk(node->u.join.left, depth);
-                node->u.join.right   = walk(node->u.join.right, depth);
-                node->u.join.on_expr = walk(node->u.join.on_expr, depth);
+                node->u.join.left    = walk(node->u.join.left, depth, mode);
+                node->u.join.right   = walk(node->u.join.right, depth, mode);
+                node->u.join.on_expr = walk(node->u.join.on_expr, depth, mode);
                 break;
             case LP_ORDER_TERM:
                 node->u.order_term.expr =
-                    walk(node->u.order_term.expr, depth);
+                    walk(node->u.order_term.expr, depth, mode);
                 break;
             case LP_LIMIT:
-                node->u.limit.count  = walk(node->u.limit.count, depth);
-                node->u.limit.offset = walk(node->u.limit.offset, depth);
+                node->u.limit.count  = walk(node->u.limit.count, depth, mode);
+                node->u.limit.offset = walk(node->u.limit.offset, depth, mode);
                 break;
             case LP_EXPR_SQLDEEP_OBJECT:
-                walk_list(&node->u.sqldeep_object.fields, depth);
+                walk_list(&node->u.sqldeep_object.fields, depth, mode);
                 break;
             case LP_SQLDEEP_FIELD:
                 node->u.sqldeep_field.key_expr =
-                    walk(node->u.sqldeep_field.key_expr, depth);
+                    walk(node->u.sqldeep_field.key_expr, depth, mode);
                 node->u.sqldeep_field.value =
-                    walk(node->u.sqldeep_field.value, depth);
+                    walk(node->u.sqldeep_field.value, depth, mode);
                 break;
             case LP_EXPR_SQLDEEP_ARRAY:
-                walk_list(&node->u.sqldeep_array.elements, depth);
+                walk_list(&node->u.sqldeep_array.elements, depth, mode);
                 break;
             case LP_EXPR_SQLDEEP_JSON_PATH:
                 node->u.sqldeep_json_path.base =
-                    walk(node->u.sqldeep_json_path.base, depth);
+                    walk(node->u.sqldeep_json_path.base, depth, mode);
+                break;
+            case LP_EXPR_SQLDEEP_XML:
+                walk_xml_children(node, depth, mode);
+                break;
+            case LP_STMT_CREATE_VIEW:
+                node->u.create_view.select =
+                    walk(node->u.create_view.select, depth, mode);
+                break;
+            case LP_STMT_INSERT:
+                node->u.insert.source = walk(node->u.insert.source, depth, mode);
+                node->u.insert.upsert = walk(node->u.insert.upsert, depth, mode);
+                walk_list(&node->u.insert.returning, depth, mode);
+                break;
+            case LP_STMT_UPDATE:
+                walk_list(&node->u.update.set_clauses, depth, mode);
+                node->u.update.from   = walk(node->u.update.from, depth, mode);
+                node->u.update.where  = walk(node->u.update.where, depth, mode);
+                walk_list(&node->u.update.order_by, depth, mode);
+                node->u.update.limit  = walk(node->u.update.limit, depth, mode);
+                walk_list(&node->u.update.returning, depth, mode);
+                break;
+            case LP_STMT_DELETE:
+                node->u.del.where = walk(node->u.del.where, depth, mode);
+                walk_list(&node->u.del.order_by, depth, mode);
+                node->u.del.limit = walk(node->u.del.limit, depth, mode);
+                walk_list(&node->u.del.returning, depth, mode);
+                break;
+            case LP_WITH:
+                walk_list(&node->u.with.ctes, depth, mode);
+                break;
+            case LP_CTE:
+                node->u.cte.select = walk(node->u.cte.select, depth, mode);
                 break;
             default:
                 break;  // leaves and not-yet-handled cases
         }
     }
 
-    void walk_list(LpNodeList *list, int depth) {
+    void walk_list(LpNodeList *list, int depth, XmlMode mode) {
         if (!list) return;
         for (int i = 0; i < list->count; i++)
-            list->items[i] = walk(list->items[i], depth);
+            list->items[i] = walk(list->items[i], depth, mode);
+    }
+
+    // XML elements propagate the active mode through nested attributes
+    // and children so jsx(<ul><li/></ul>) emits xml_element_jsx for
+    // both the outer ul and the inner li.
+    void walk_xml_children(LpNode *node, int depth, XmlMode mode) {
+        auto& x = node->u.sqldeep_xml;
+        for (int i = 0; i < x.attrs.count; i++) {
+            LpNode *a = x.attrs.items[i];
+            if (!a) continue;
+            a->u.sqldeep_xml_attr.value =
+                walk(a->u.sqldeep_xml_attr.value, depth, mode);
+        }
+        for (int i = 0; i < x.children.count; i++)
+            x.children.items[i] = walk(x.children.items[i], depth, mode);
     }
 
     // ── Rewrites ─────────────────────────────────────────────────
 
+    // Detect the "aggregate field" form: a sqldeep field whose value
+    // is a SELECT with no FROM clause, exactly one result column, and
+    // no other clauses. In sqldeep, `{field: SELECT expr}` (no FROM)
+    // means "aggregate `expr` over the current GROUP BY scope" and
+    // becomes 'field', fn_group_array(expr) — or just 'field', expr
+    // when singular (SELECT/1).
+    //
+    // The grammar wraps the bare SELECT in LP_EXPR_SUBQUERY; we unwrap
+    // it back to the right expression here.
+    LpNode *maybe_aggregate_field_value(LpNode *v) {
+        if (!v || v->kind != LP_EXPR_SUBQUERY) return v;
+        LpNode *sel = v->u.subquery.select;
+        if (!sel || sel->kind != LP_STMT_SELECT) return v;
+        const auto& s = sel->u.select;
+        if (s.from || s.where || s.having || s.with) return v;
+        if (s.group_by.count || s.order_by.count || s.window_defs.count) return v;
+        if (s.result_columns.count != 1) return v;
+        LpNode *rc = s.result_columns.items[0];
+        LpNode *expr = (rc && rc->kind == LP_RESULT_COLUMN)
+                          ? rc->u.result_column.expr : rc;
+        if (!expr) return v;
+        // LIMIT 1 (from SELECT/1) → just the bare expr.
+        if (s.limit) return expr;
+        return make_function(arena_, fn_group_array(), {expr});
+    }
+
     // { a, key: expr, "k": v, (e): v, a.b } →
     //   fn_object('a', a, 'key', expr, 'k', v, e, v, 'b', a.b)
+    // Literal `true` / `false` values are wrapped via sqldeep_json('...')
+    // so they serialize as JSON bools rather than integers (sqlite/vanilla).
+    // Aggregate field form `field: SELECT expr` collapses to
+    // 'field', fn_group_array(expr).
     LpNode *rewrite_object(LpNode *node) {
         std::vector<LpNode*> args;
         const auto& fields = node->u.sqldeep_object.fields;
@@ -357,26 +515,30 @@ private:
             if (!f) continue;
             const auto& sf = f->u.sqldeep_field;
             switch (sf.key_form) {
-                case 0:  // bare
+                case 0: { // bare
                     args.push_back(make_string_lit(arena_, sf.key_text));
                     args.push_back(make_column_ref(arena_, sf.key_text));
                     break;
+                }
                 case 1:  // named id : expr
                 case 2:  // "string" : expr
-                case 5:  // qualified  a.b
+                case 5: { // qualified  a.b
+                    LpNode *v = maybe_aggregate_field_value(sf.value);
                     args.push_back(make_string_lit(arena_, sf.key_text));
-                    args.push_back(sf.value);
+                    args.push_back(wrap_json_bool(v));
                     break;
-                case 3:  // (expr) : val
+                }
+                case 3: {  // (expr) : val
+                    LpNode *v = maybe_aggregate_field_value(sf.value);
                     args.push_back(sf.key_expr);
-                    args.push_back(sf.value);
+                    args.push_back(wrap_json_bool(v));
                     break;
+                }
                 case 4:  // recursive children — handled by RECURSE expansion
                 default:
                     break;
             }
         }
-        // Mutate node in place to LP_EXPR_FUNCTION.
         node->kind = LP_EXPR_FUNCTION;
         std::memset(&node->u, 0, sizeof(node->u));
         node->u.function.name = arena_strdup(arena_, fn_object());
@@ -384,14 +546,15 @@ private:
         return node;
     }
 
-    // [ e1, e2, ... ] → fn_array(e1, e2, ...)
+    // [ e1, e2, ... ] → fn_array(e1, e2, ...) with bool wrapping.
     LpNode *rewrite_array(LpNode *node) {
         LpNodeList elements = node->u.sqldeep_array.elements;
         node->kind = LP_EXPR_FUNCTION;
         std::memset(&node->u, 0, sizeof(node->u));
         node->u.function.name = arena_strdup(arena_, fn_array());
         for (int i = 0; i < elements.count; i++)
-            list_append(arena_, &node->u.function.args, elements.items[i]);
+            list_append(arena_, &node->u.function.args,
+                        wrap_json_bool(elements.items[i]));
         return node;
     }
 
@@ -445,6 +608,91 @@ private:
         return node;
     }
 
+    // <tag attrs>body</tag> →
+    //   xml_element('tag', xml_attrs(...), child1, child2, ...)
+    // Self-closing <tag/> uses 'tag/' as the literal string so the
+    // runtime function knows to emit the void-element form.
+    // Mode (XML / Jsonml / Jsx) selects the function family.
+    LpNode *rewrite_xml(LpNode *node, XmlMode mode) {
+        const auto& x = node->u.sqldeep_xml;
+        const char *fn_el, *fn_attrs;
+        switch (mode) {
+            case XmlMode::Jsx:
+                fn_el = "xml_element_jsx";
+                fn_attrs = "xml_attrs_jsx";
+                break;
+            case XmlMode::Jsonml:
+                fn_el = "xml_element_jsonml";
+                fn_attrs = "xml_attrs_jsonml";
+                break;
+            default:
+                fn_el = "xml_element";
+                fn_attrs = "xml_attrs";
+                break;
+        }
+
+        std::vector<LpNode*> args;
+
+        // tag: bare for non-self-closing, with trailing "/" marker
+        // for self-closing so the runtime emits <tag/> form.
+        std::string tag = x.tag ? x.tag : "";
+        if (x.self_closing) tag += "/";
+        args.push_back(make_string_lit(arena_, tag));
+
+        // attrs: xml_attrs('name', value, ...). Boolean attributes
+        // (no `=value`) become sqldeep_json('true') wrappers via the
+        // BLOB protocol so the runtime distinguishes them from
+        // attr="1" / attr="true" string values.
+        if (x.attrs.count > 0) {
+            std::vector<LpNode*> attr_args;
+            for (int i = 0; i < x.attrs.count; i++) {
+                LpNode *a = x.attrs.items[i];
+                if (!a) continue;
+                const auto& av = a->u.sqldeep_xml_attr;
+                attr_args.push_back(make_string_lit(arena_, av.name));
+                if (av.value) {
+                    if (av.dynamic) {
+                        attr_args.push_back(wrap_json_bool(av.value));
+                    } else {
+                        attr_args.push_back(av.value);
+                    }
+                } else {
+                    // Boolean attribute: <input disabled/>
+                    const char *fn = fn_json_blob();
+                    if (fn) {
+                        attr_args.push_back(make_function(
+                            arena_, fn,
+                            {make_string_lit(arena_, "true")}));
+                    } else {
+                        attr_args.push_back(make_string_lit(arena_, "true"));
+                    }
+                }
+            }
+            args.push_back(make_function(arena_, fn_attrs, attr_args));
+        }
+
+        // children: text → string literal; nested element → recurse
+        // (already rewritten in post-order); anything else is an
+        // interpolation expression, with bool wrap applied.
+        for (int i = 0; i < x.children.count; i++) {
+            LpNode *c = x.children.items[i];
+            if (!c) continue;
+            if (c->kind == LP_SQLDEEP_XML_TEXT) {
+                args.push_back(make_string_lit(
+                    arena_, c->u.sqldeep_xml_text.text
+                              ? c->u.sqldeep_xml_text.text : ""));
+            } else {
+                args.push_back(wrap_json_bool(c));
+            }
+        }
+
+        node->kind = LP_EXPR_FUNCTION;
+        std::memset(&node->u, 0, sizeof(node->u));
+        node->u.function.name = arena_strdup(arena_, fn_el);
+        for (auto *a : args) list_append(arena_, &node->u.function.args, a);
+        return node;
+    }
+
     // SELECT-level handling: singular → LIMIT 1; deep projection wrapping;
     // FROM-first flag cleared (canonical unparser emits standard order).
     LpNode *rewrite_select(LpNode *node) {
@@ -453,86 +701,112 @@ private:
         // the output reads as standard SQL.
         node->u.select.sqldeep_from_first = 0;
 
+        bool was_singular = node->u.select.sqldeep_singular;
+
         // SELECT/1 → LIMIT 1 (unless a LIMIT is already specified).
-        if (node->u.select.sqldeep_singular) {
+        if (was_singular) {
             node->u.select.sqldeep_singular = 0;
             if (!node->u.select.limit) {
                 node->u.select.limit = make_limit(arena_, 1);
             }
         }
 
-        // Deep-projection wrapping: the SELECT's deep projection
-        // (now rewritten to a fn_object/fn_array call) gets wrapped in
-        // fn_group_array when the SELECT is a *deep* value subquery —
-        // i.e. it sits where one row's projection becomes one
-        // collection-element of an enclosing deep projection. Concretely:
-        // the SELECT's parent is LP_EXPR_SUBQUERY, and that subquery's
-        // parent is LP_SQLDEEP_FIELD or LP_EXPR_SQLDEEP_ARRAY (the
-        // sqldeep containers that supply a value slot).
+        // SELECT/1 [single_elem] FROM t → SELECT single_elem FROM t LIMIT 1.
+        // The single-element array literal already became fn_array(elem) in
+        // the post-order walk; unwrap it back to bare `elem` when singular.
+        if (was_singular
+            && node->u.select.result_columns.count == 1) {
+            LpNode *rc = node->u.select.result_columns.items[0];
+            LpNode *proj = (rc && rc->kind == LP_RESULT_COLUMN)
+                              ? rc->u.result_column.expr : rc;
+            if (proj && proj->kind == LP_EXPR_FUNCTION
+                && proj->u.function.name
+                && std::strcmp(proj->u.function.name, fn_array()) == 0
+                && proj->u.function.args.count == 1) {
+                LpNode *elem = proj->u.function.args.items[0];
+                if (rc && rc->kind == LP_RESULT_COLUMN)
+                    rc->u.result_column.expr = elem;
+                else
+                    node->u.select.result_columns.items[0] = elem;
+            }
+        }
+
+        // Deep-projection wrapping. The rules (mirroring sqldeep):
         //
-        // Plain scalar-subquery contexts (function args, WHERE,
-        // arithmetic, IN, EXISTS, etc.) do NOT wrap — the inner SELECT
-        // already returns a single composite value.
-        LpNode *parent = node->parent;
-        if (!parent || parent->kind != LP_EXPR_SUBQUERY) return node;
-        LpNode *grandparent = parent->parent;
-        if (!grandparent) return node;
-        if (grandparent->kind != LP_SQLDEEP_FIELD &&
-            grandparent->kind != LP_EXPR_SQLDEEP_ARRAY) return node;
+        //   Array projection [...] — ALWAYS wraps in fn_group_array,
+        //   regardless of nesting. Single-element arrays unwrap to
+        //   the bare element first; multi-element wrap the whole
+        //   fn_array(...) call.
+        //
+        //   Object projection {...} — wraps only when the SELECT is a
+        //   value subquery in an "aggregating" context: parent is
+        //   LP_EXPR_SUBQUERY whose parent is LP_SQLDEEP_FIELD or
+        //   LP_EXPR_SQLDEEP_ARRAY or LP_EXPR_IN.
+        //
+        //   Singular (/1) — never wrap, no group_array. The singular
+        //   array-element unwrap already happened above.
+        //
+        // Scalar-subquery contexts (function args, WHERE comparisons,
+        // arithmetic, EXISTS, etc.) do NOT wrap.
+
+        if (node->u.select.limit) return node;  // singular / explicit LIMIT
         if (node->u.select.result_columns.count != 1) return node;
 
         LpNode *rc = node->u.select.result_columns.items[0];
         LpNode *proj = (rc && rc->kind == LP_RESULT_COLUMN)
                           ? rc->u.result_column.expr : rc;
-        if (!proj) return node;
-
-        // Skip wrapping when the inner SELECT is singular — it already
-        // got LIMIT 1, the value is one row, no group_array.
-        // (Tracked via the just-set LIMIT — see above.)
-
-        // The projection function-call name tells us what shape it has.
-        // We only wrap our own builders, never user code.
-        if (proj->kind != LP_EXPR_FUNCTION) return node;
+        if (!proj || proj->kind != LP_EXPR_FUNCTION) return node;
         const char *pname = proj->u.function.name;
         if (!pname) return node;
 
-        const char *obj  = fn_object();
-        const char *arr  = fn_array();
-        bool is_obj = std::strcmp(pname, obj) == 0;
-        bool is_arr = std::strcmp(pname, arr) == 0;
+        bool is_obj = std::strcmp(pname, fn_object()) == 0;
+        bool is_arr = std::strcmp(pname, fn_array()) == 0;
         if (!is_obj && !is_arr) return node;
 
-        // Singular projections: leave unwrapped (LIMIT 1 set earlier).
-        if (node->u.select.limit) {
-            // If the LIMIT was set by our singular promotion above, the
-            // sqldeep_singular flag was cleared. We can't distinguish
-            // "user wrote LIMIT 1" from "we set it" — but treating both
-            // as singular for wrap purposes is correct: a LIMIT-1
-            // subquery returns at most one row, so json_group_array
-            // would just wrap one element, semantically equivalent but
-            // a needless wrap. Prefer leaving unwrapped here. (Sqldeep
-            // hand-written renderer makes the same call.)
-            return node;
-        }
-
-        // Single-element array projection: hoist the element out of
-        // the json_array call before wrapping. [expr] becomes
-        // group_array(expr), not group_array(json_array(expr)).
-        if (is_arr && proj->u.function.args.count == 1) {
-            LpNode *elem = proj->u.function.args.items[0];
-            LpNode *wrapped = make_function(arena_, fn_group_array(), {elem});
+        // Helper: set the projection back.
+        auto replace_projection = [&](LpNode *new_expr) {
             if (rc && rc->kind == LP_RESULT_COLUMN)
-                rc->u.result_column.expr = wrapped;
+                rc->u.result_column.expr = new_expr;
             else
-                node->u.select.result_columns.items[0] = wrapped;
+                node->u.select.result_columns.items[0] = new_expr;
+        };
+
+        // XML projection in a value-subquery whose grandparent is an
+        // XML element (i.e. <ul>{SELECT <li/> FROM t}</ul>) gets
+        // wrapped in the corresponding {xml,jsx,jsonml}_agg helper so
+        // rows aggregate into one XML fragment.
+        bool is_xml = std::strcmp(pname, "xml_element") == 0
+                    || std::strcmp(pname, "xml_element_jsx") == 0
+                    || std::strcmp(pname, "xml_element_jsonml") == 0;
+        if (is_xml) {
+            LpNode *parent = node->parent;
+            if (!parent || parent->kind != LP_EXPR_SUBQUERY) return node;
+            LpNode *gp = parent->parent;
+            if (!gp || gp->kind != LP_EXPR_SQLDEEP_XML) return node;
+            const char *agg = "xml_agg";
+            if (std::strcmp(pname, "xml_element_jsx") == 0)    agg = "jsx_agg";
+            if (std::strcmp(pname, "xml_element_jsonml") == 0) agg = "jsonml_agg";
+            replace_projection(make_function(arena_, agg, {proj}));
             return node;
         }
 
-        LpNode *wrapped = make_function(arena_, fn_group_array(), {proj});
-        if (rc && rc->kind == LP_RESULT_COLUMN)
-            rc->u.result_column.expr = wrapped;
-        else
-            node->u.select.result_columns.items[0] = wrapped;
+        if (is_obj) {
+            // Object wrap requires aggregating-context grandparent.
+            LpNode *parent = node->parent;
+            if (!parent || parent->kind != LP_EXPR_SUBQUERY) return node;
+            LpNode *gp = parent->parent;
+            if (!gp) return node;
+            if (gp->kind != LP_SQLDEEP_FIELD &&
+                gp->kind != LP_EXPR_SQLDEEP_ARRAY &&
+                gp->kind != LP_EXPR_IN) return node;
+            replace_projection(make_function(arena_, fn_group_array(), {proj}));
+            return node;
+        }
+
+        // Array projection: unwrap single-element; wrap in group_array.
+        LpNode *inner = (proj->u.function.args.count == 1)
+                          ? proj->u.function.args.items[0] : proj;
+        replace_projection(make_function(arena_, fn_group_array(), {inner}));
         return node;
     }
 };
