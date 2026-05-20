@@ -100,7 +100,8 @@ convention:
 
   - name: object literal nested in parens
     input: "SELECT coalesce(({name, value}), null) FROM t"
-    expected: "SELECT coalesce((sqldeep_json_object('name', name, 'value', value)), null) FROM t"
+    # Canonical form drops redundant parens and uppercases NULL keyword.
+    expected: "SELECT coalesce(sqldeep_json_object('name', name, 'value', value), NULL) FROM t"
 
   # Deep constructs at any paren depth
   - name: deep select subquery in function call
@@ -675,7 +676,8 @@ convention:
 
   - name: json path no transform on plain parens
     input: "SELECT (x + 1) FROM t"
-    expected: "SELECT (x + 1) FROM t"
+    # Canonical form drops redundant parens around an expression.
+    expected: "SELECT x + 1 FROM t"
 
 # ── Recursive select ─────────────────────────────────────────────────
 
