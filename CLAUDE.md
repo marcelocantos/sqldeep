@@ -23,55 +23,80 @@ system (`mkfile`).
 
 ## Architecture
 
-Pure `string → string` transformation. No database dependency. The `Backend`
-enum selects which JSON function names to emit (SQLite: `sqldeep_json_object`,
-`sqldeep_json_array`, `sqldeep_json_group_array`; PostgreSQL: `jsonb_build_object`,
-`jsonb_build_array`, `jsonb_agg`). All other SQL (JOIN, WHERE, LIMIT, etc.)
-is standard and works unchanged across backends.
+Pure `string → string` transformation. No database dependency at parse/
+transform time. The `Backend` enum selects which JSON function names to
+emit (SQLite: `sqldeep_json_object`, `sqldeep_json_array`,
+`sqldeep_json_group_array`; PostgreSQL: `jsonb_build_object`,
+`jsonb_build_array`, `jsonb_agg`; SQLite_vanilla: built-in `json_object`
+/ `json_array` / `json_group_array`). All other SQL (JOIN, WHERE, LIMIT,
+etc.) is standard and works unchanged across backends.
 
-### Components (all internal to `sqldeep.cpp`)
+### Pipeline
 
-1. **Lexer** — tokenizes input with source position tracking (line/col/offset).
-   Strips `//` comments. Handles single-quoted strings (SQL), double-quoted
-   strings (JSON-style keys), identifiers, numbers, operators.
+Sqldeep is implemented as an AST-rewrite layer on top of
+[deepparser](https://github.com/marcelocantos/deepparser), a fork of
+sqliteai/liteparser with sqldeep grammar extensions. The pipeline:
 
-2. **AST** — `SqlParts` (vector of string | DeepSelect | ObjectLiteral |
-   ArrayLiteral | JoinPath) is the spine. Represents SQL-inside-JSON-inside-SQL
-   to arbitrary nesting depth. `DeepSelect` has a `bool singular` flag for
-   `SELECT/1` (singular select).
+```
+SQL text  ─▶  lp_parse_all              (deepparser — real SQL parser)
+          ─▶  Transformer::transform    (sqldeep — mutates LpNode in place)
+          ─▶  lp_ast_to_sql             (deepparser — canonical unparser)
+          ─▶  output SQL
+```
 
-3. **Alias pre-scan** — before parsing, a lightweight lexer pass builds a global
-   `alias → table name` map from FROM/JOIN clauses. This allows join path
-   resolution even when the alias definition appears later in the source
-   (SQL defines aliases in FROM, which comes after the SELECT projection).
-   Handles both `->` and `<-` arrows, and chains of arbitrary length.
+Deepparser owns parsing and canonical printing. Sqldeep owns the
+dialect-specific transformation: a single `Transformer` class that
+walks the AST post-order and rewrites every sqldeep extension node
+(`LP_EXPR_SQLDEEP_OBJECT/ARRAY/FIELD/JOIN_PATH/JSON_PATH/XML/RECURSE`,
+the `sqldeep_singular`/`sqldeep_from_first` flags on `LP_STMT_SELECT`)
+into standard SQL node kinds (`LP_EXPR_FUNCTION`, `LP_FROM_TABLE`/
+`LP_JOIN_CLAUSE`, `LP_WITH`+`LP_CTE`, `LP_LIMIT`). Once the AST contains
+only plain SQL kinds, deepparser's canonical unparser emits the result.
 
-4. **Parser** — unified recursive descent. Scans SQL tokens, descending into
-   deep construct parsing when `SELECT {`, `SELECT [`, `{`, or `[` is
-   encountered. `try_consume_singular()` detects the `/1` suffix after SELECT.
-   Handles `(SELECT {/[)` subquery pattern specially to avoid double-wrapping
-   parens. Tracks paren depth and string literals to distinguish structural
-   commas from expression-internal commas. Detects
-   `ident (-> | <-) table [alias] [ON/USING] ...` join path patterns and emits
-   `JoinPath` AST nodes supporting arbitrary chains with optional explicit
-   column specifications. Detects `(expr).path` JSON path patterns during
-   token accumulation using a paren-position stack, transforming them inline
-   to `json_extract()`/`jsonb_extract_path()` based on backend. Detects
-   `<ident` as XML element start (unambiguous — `<` cannot start a SQL
-   expression) and dispatches to `parse_xml_element()` which uses
-   `read_raw_until_xml_special()` for body text between tags.
+Bare-expression inputs (`<div/>`, `{a, b}`) are wrapped in `SELECT …`
+for parsing and unwrapped on output, preserving sqldeep's historical
+"give me a fragment" calling convention.
 
-5. **Renderer** — walks AST, emits standard SQL. Parameterised by `Backend`:
-   JSON function names (`fn_object_`, `fn_array_`, `fn_group_array_`) are set
-   at construction. Object literals become `fn_object_(...)`, array literals
-   become `fn_array_(...)`, deep selects wrap in `fn_group_array_(...)`.
-   Singular selects (`SELECT/1`) skip group-array wrapping and append
-   `LIMIT 1`.
-   Join paths emit
-   `FROM step1_table [JOIN step2 ON ...] WHERE step1.start_table_id = start.start_table_id`.
-   Column names come from inline ON/USING clauses when present, then
-   explicit FK metadata when provided, or the `<table>_id` convention
-   otherwise. Multi-column joins produce AND-joined conditions.
+### Components (all in `dist/sqldeep.cpp`)
+
+- **`Transformer`** — the AST walker. One member function per sqldeep
+  node kind (`rewrite_object`, `rewrite_array`, `rewrite_json_path`,
+  `rewrite_xml`, `rewrite_join_path`, `rewrite_recursive_select`,
+  `rewrite_select`), plus AST-building helpers (`make_function`,
+  `make_column_ref2`, `make_join`, `make_binop`, etc.). Recursion is
+  post-order so children are already standard SQL by the time their
+  parent's rewriter runs.
+
+- **Alias map** — one prepass over the AST collects every `alias → table_name` pair from FROM clauses and join-path steps so a join arrow
+  like `c->orders` can resolve the leftmost name to the underlying
+  table even when the alias is introduced by an enclosing SELECT.
+
+- **FK index** — a `(child_table, parent_table) → ColumnPair[]` map
+  built from the user-supplied `sqldeep_foreign_key` array. Used by
+  the join-path rewriter when in FK-guided mode; unused in convention
+  mode (`<parent>_id` everywhere).
+
+- **C API bridge** — the `extern "C"` shim that wraps the Transformer
+  pipeline behind `sqldeep_transpile_*` and converts the C
+  `sqldeep_foreign_key` structs into the C++ `ForeignKey` vector.
+
+The recursive SELECT (`RECURSE ON (fk [= pk])`) is rewritten by
+constructing its 3-CTE bracket-injection template as SQL text and
+re-parsing that text through deepparser to produce a standard SQL
+AST. The shape (`_sdq_dfs` DFS + `_sdq_ranked` row-numbered objects
++ `_sdq_events` open/close fragments stitched by `group_concat` /
+`string_agg`) is identical to the old hand-written renderer.
+
+### Deepparser fork
+
+The `vendor/deepparser/` submodule tracks the `sqldeep-grammar` branch
+of `marcelocantos/deepparser`. The deepparser delta against upstream
+liteparser is intentionally minimal — grammar extensions and canonical
+unparser support for the sqldeep AST nodes, plus a handful of
+canonical-formatting tweaks (no `AS` on aliases, tight `->`/`->>`
+spacing, unquoted `true`/`false`, bare `JOIN` over `INNER JOIN`, no
+synthesised default window frame). All dialect / transformation
+knowledge lives in sqldeep, not in deepparser.
 
 ### Syntax
 

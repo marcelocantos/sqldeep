@@ -1,11 +1,10 @@
-schema_version: 3
+schema_version: 5
 targets:
   T1:
     name: sqldeep reaches v1.0.0 with all syntax and API surfaces declared stable
     status: converging
     value: 13.0
     cost: 3.0
-    showcase: true
     acceptance:
     - All items in STABILITY.md are marked Stable (no Experimental or Needs review remaining)
     - STABILITY.md Gaps and prerequisites section is resolved or moved to Out of scope
@@ -55,10 +54,10 @@ targets:
     achieved: 2026-04-08
   T5:
     name: SQLite-backend transpile parses input via deepparser AST instead of the hand-written parser
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
-    showcase: true
+    actual_cost: 5.0
     acceptance:
     - sqldeep_transpile_backend(SQLDEEP_SQLITE) parses input via lp_parse_all and walks the resulting AST to produce output, instead of the hand-written recursive-descent parser in dist/sqldeep.cpp
     - sqldeep_transpile_backend(SQLDEEP_SQLITE_VANILLA) shares the deepparser-based path with a different JSON-function emitter table
@@ -69,3 +68,4 @@ targets:
     context: 'Replaces the original ''fix the CTE paren bug'' framing. The CTE bug (unmatched paren on plain SQL) was a symptom of sqldeep''s hand-written parser doing partial parsing — scanning tokens for sqldeep triggers while approximately tracking SQL state. Every exotic plain-SQL form (windows, lateral, etc.) is a latent bug of the same shape. The durable fix is a real SQL parser. After evaluating options, decision was to fork sqliteai/liteparser as marcelocantos/deepparser (vendored as submodule at vendor/deepparser/), extend its Lemon grammar with sqldeep productions, and replace sqldeep parser entirely for SQLite backends. PG backend stays on the hand-written parser for now (separately tracked, sqldeep PG path is unused). See vendor/deepparser/bullseye.yaml T1 for the deepparser-side work: grammar extensions, AST kinds, unparse handlers, round-trip parity.'
     origin: manual
     discovered: 2026-05-13
+    achieved: 2026-05-20

@@ -114,3 +114,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `9ac5ded`
 - **Outcome**: Released v0.21.0 (darwin-arm64, linux-amd64, linux-arm64). Added SQLDEEP_SQLITE_VANILLA backend for environments without custom functions. Go TranspileVanilla/TranspileFKVanilla convenience functions. 650 assertions pass (10 test cases).
+
+## 2026-05-20 — /release v0.22.0
+
+- **Commit**: `be78fca` (PR #19) + release prep
+- **Outcome**: Released v0.22.0 (darwin-arm64, linux-amd64, linux-arm64). Replaced the hand-written `Lexer` / `Parser` / `SqlParts` / `Renderer` (~2500 lines) with an AST-rewrite pipeline backed by deepparser: `lp_parse_all` → `Transformer::transform` → `lp_ast_to_sql`. Sqldeep is now ~1400 lines of dialect-specific AST mutation; deepparser handles parsing and canonical printing. The C API and the documented sqldeep input/output syntax are unchanged. Pre-existing latent-bug classes from the old text-based parser (CTE unmatched-paren, exotic SQL forms it didn't understand) are eliminated. 650 assertions pass (10 test cases). 🎯T9 ("SQLite-backend transpile parses input via deepparser AST") achieved.

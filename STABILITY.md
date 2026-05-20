@@ -317,19 +317,28 @@ Before 1.0:
   composition with XML BLOBs without type-boundary CAST calls. Needs real-world
   usage to confirm the BLOB protocol round-trips correctly through all SQL
   contexts (views, CTEs, subqueries, language bindings).
-- **Parser migration to deepparser**: The current hand-written recursive-descent
-  parser in `dist/sqldeep.cpp` does partial parsing of surrounding SQL while
-  scanning for sqldeep triggers, which produces latent bugs on exotic SQL forms
-  (e.g. plain-SQL CTEs trigger `unmatched ')'`). The fix is to replace the
-  parser with [deepparser](https://github.com/marcelocantos/deepparser) — a fork
-  of [sqliteai/liteparser](https://github.com/sqliteai/liteparser) extended with
-  sqldeep grammar productions. After migration, the SQLite backends
-  (`SQLDEEP_SQLITE`, `SQLDEEP_SQLITE_VANILLA`) will parse via deepparser's AST,
-  eliminating the partial-parsing bug class. The PostgreSQL backend
-  (`SQLDEEP_POSTGRES`) will remain on the hand-written parser as a **legacy
-  path** until separately migrated — it is currently unused in production and
-  has the same partial-parsing limitations (no plain-SQL CTE support, no window
-  functions, no lateral joins). Migration tracked in
+- **Deepparser-backed parser** (v0.22.0): The hand-written
+  recursive-descent parser in `dist/sqldeep.cpp` has been removed.
+  All backends (`SQLDEEP_SQLITE`, `SQLDEEP_SQLITE_VANILLA`,
+  `SQLDEEP_POSTGRES`) now parse input via
+  [deepparser](https://github.com/marcelocantos/deepparser) — a fork
+  of [sqliteai/liteparser](https://github.com/sqliteai/liteparser) with
+  sqldeep grammar productions — and emit through deepparser's
+  canonical unparser. Sqldeep itself is now an AST → AST mutator: it
+  walks `LpNode` post-order and rewrites sqldeep extension nodes
+  into standard SQL node kinds (`LP_EXPR_FUNCTION`, `LP_FROM_TABLE` /
+  `LP_JOIN_CLAUSE`, `LP_WITH` / `LP_CTE`, `LP_LIMIT`) before the
+  canonical unparser emits the result.
+
+  The C API and documented sqldeep input/output syntax are unchanged.
+  Latent bug classes from the old text-based parser (plain-SQL CTEs
+  triggering `unmatched ')'`, exotic forms the partial parser didn't
+  understand) are eliminated: plain SQL passes through verbatim
+  because deepparser is a real SQLite parser. Output may differ from
+  pre-v0.22.0 in cosmetic ways — canonical-form whitespace, dropped
+  redundant parens, `INNER JOIN` collapsed to `JOIN`, uppercase
+  `NULL` keyword — but is semantically identical to the old form.
+  Migration tracked in retired
   [sqldeep T5](bullseye.yaml) and
   [deepparser T1](vendor/deepparser/bullseye.yaml).
 
