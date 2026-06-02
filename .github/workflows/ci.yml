@@ -11,20 +11,20 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            mk_asset: mk-0.7.0-linux-amd64.tar.gz
+            cv_asset: cv-0.10.0-linux-amd64.tar.gz
           - os: macos-latest
-            mk_asset: mk-0.7.0-darwin-arm64.tar.gz
+            cv_asset: cv-0.10.0-darwin-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install mk
+      - name: Install cv
         run: |
-          curl -fsSL "https://github.com/marcelocantos/mk/releases/download/v0.7.0/${{ matrix.mk_asset }}" \
+          curl -fsSL "https://github.com/marcelocantos/cv/releases/download/v0.10.0/${{ matrix.cv_asset }}" \
             | tar xz
-          sudo mv mk /usr/local/bin/mk
+          sudo mv cv /usr/local/bin/cv
 
       - name: Build and run tests
-        run: mk test
+        run: cv test

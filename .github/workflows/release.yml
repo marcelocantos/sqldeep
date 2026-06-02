@@ -13,13 +13,13 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            mk_arch: darwin-arm64
+            cv_arch: darwin-arm64
             asset_suffix: darwin-arm64
           - os: ubuntu-latest
-            mk_arch: linux-amd64
+            cv_arch: linux-amd64
             asset_suffix: linux-amd64
           - os: ubuntu-24.04-arm
-            mk_arch: linux-arm64
+            cv_arch: linux-arm64
             asset_suffix: linux-arm64
     runs-on: ${{ matrix.os }}
     steps:
@@ -27,13 +27,13 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install mk
+      - name: Install cv
         run: |
-          MK_VERSION=$(gh release view --repo marcelocantos/mk --json tagName -q .tagName)
-          MK_VER=${MK_VERSION#v}
-          curl -fsSL "https://github.com/marcelocantos/mk/releases/download/${MK_VERSION}/mk-${MK_VER}-${{ matrix.mk_arch }}.tar.gz" \
+          CV_VERSION=$(gh release view --repo marcelocantos/cv --json tagName -q .tagName)
+          CV_VER=${CV_VERSION#v}
+          curl -fsSL "https://github.com/marcelocantos/cv/releases/download/${CV_VERSION}/cv-${CV_VER}-${{ matrix.cv_arch }}.tar.gz" \
             | tar xz
-          sudo mv mk /usr/local/bin/mk
+          sudo mv cv /usr/local/bin/cv
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -42,10 +42,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libreadline-dev
 
       - name: Run tests
-        run: mk test
+        run: cv test
 
       - name: Build binary
-        run: mk shell
+        run: cv shell
 
       - name: Package
         run: |
