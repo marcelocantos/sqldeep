@@ -308,16 +308,16 @@ On error, functions return `NULL` and set the `err_msg`, `err_line`, and
 ```sh
 git clone https://github.com/marcelocantos/sqldeep.git
 cd sqldeep
-mk test     # run tests
+cv test     # run tests
 mk example  # run the demo
 ```
 
-Requires C++20 and [mk](https://github.com/marcelocantos/mk).
+Requires C++20 and [cv](https://github.com/marcelocantos/cv).
 
 ### Interactive CLI
 
 ```sh
-mk shell                       # build the CLI
+cv shell                       # build the CLI
 cp build/sqldeep ~/.local/bin/  # install
 sqldeep mydb.db                 # interactive session
 ```

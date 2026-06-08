@@ -7,13 +7,13 @@ Single public C header (`sqldeep.h`) with implementation in `sqldeep.cpp`.
 ## Build
 
 ```sh
-mk test     # build and run all tests
+cv test     # build and run all tests
 mk example  # build and run examples/demo.cpp
-mk clean    # remove build/
+cv clean    # remove build/
 ```
 
-Requires C++20. Uses [mk](https://github.com/marcelocantos/mk) as the build
-system (`mkfile`).
+Requires C++20. Uses [cv](https://github.com/marcelocantos/cv) as the build
+system (`cvfile`).
 
 ## Dependencies
 
@@ -192,7 +192,7 @@ dist/
 tests/                      doctest test files
 examples/                   demo.cpp
 vendor/                     Third-party dependencies
-mkfile                      Build system (mk)
+cvfile                      Build system (cv)
 ```
 
 ## Tests

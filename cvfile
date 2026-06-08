@@ -43,7 +43,7 @@ test_objs = $[patsubst %.cpp,build/%.o,$test_srcs]
 !shell: build/sqldeep
 
 !clean:
-    rm -rf build/ .mk/
+    rm -rf build/ .cv/
 
 # ── Binaries ─────────────────────────────────────────────────────────
 # sqldeep.cpp calls deepparser's lp_parse_all / lp_ast_to_sql, so every
