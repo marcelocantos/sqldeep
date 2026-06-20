@@ -16,7 +16,7 @@ jobs:
             cv_asset: cv-0.10.0-darwin-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
