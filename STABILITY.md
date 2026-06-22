@@ -145,6 +145,7 @@ Native code built via CMake (C++20). Works on Android and JVM desktop.
 | Plain FROM-first select | `FROM t SELECT id, name` | **Stable** |
 | SQL passthrough | `SELECT id FROM t` | **Stable** |
 | SQL `->` / `->>` passthrough | `data->>'name'` in non-FROM context | **Stable** |
+| Bind parameters | `:name`, `@n`, `$n`, `?`, `?N` (SQL passthrough) | **Experimental** |
 | Recursive select | `SELECT { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
 | Recursive explicit PK | `RECURSE ON (fk = pk)` | **Experimental** |
 | Recursive singular | `SELECT/1 { ..., children: * } FROM t RECURSE ON (fk)` | **Experimental** |
@@ -181,6 +182,7 @@ Native code built via CMake (C++20). Works on Android and JVM desktop.
 | Reverse join | `FROM table WHERE alias.table_id = table.table_id` | **Stable** |
 | Join path chain | `FROM t1 JOIN t2 ON ... WHERE ...` | **Stable** |
 | Plain FROM-first select | `SELECT expr FROM ...` (rearranged, no JSON) | **Stable** |
+| Bind parameter order | named/numbered pass through; bare `?` order preserved or error | **Experimental** |
 | ON/USING override | `o.cust_id = c.id` (explicit column pair) | **Stable** |
 | JSON path (SQLite) | `json_extract(expr, '$.field[n]')` | **Stable** |
 | JSON path (PostgreSQL) | `jsonb_extract_path(expr, 'field', 'n')` | **Stable** |

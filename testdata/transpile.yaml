@@ -912,6 +912,71 @@ convention:
     input: "jsx(<Graph data={{x, y}}/>)"
     expected: "xml_element_jsx('Graph/', xml_attrs_jsx('data', sqldeep_json_object('x', x, 'y', y)))"
 
+  # ── Bind parameters ─────────────────────────────────────────────────
+  # Named (:x / @x / $x) and numbered (?N) parameters bind by name/index,
+  # so they pass through unchanged even when a rewrite moves them. Bare
+  # "?" binds by textual position, so it survives only when the rewrite
+  # keeps its order (see the "errors" section for the cases that don't).
+  - name: param named in where
+    input: "SELECT { id, name } FROM users WHERE id = :uid"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM users WHERE id = :uid"
+    expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM users WHERE id = :uid"
+
+  - name: param named at-sign and dollar
+    input: "SELECT { id } FROM users WHERE a = @x AND b = $y"
+    expected: "SELECT sqldeep_json_object('id', id) FROM users WHERE a = @x AND b = $y"
+    expected_postgres: "SELECT jsonb_build_object('id', id) FROM users WHERE a = @x AND b = $y"
+
+  - name: param named survives from-first reorder
+    input: "FROM users WHERE id = :uid SELECT { id, name }"
+    expected: "SELECT sqldeep_json_object('id', id, 'name', name) FROM users WHERE id = :uid"
+    expected_postgres: "SELECT jsonb_build_object('id', id, 'name', name) FROM users WHERE id = :uid"
+
+  - name: param named both projection and clause from-first
+    input: "FROM t WHERE a = :a SELECT { b: :b }"
+    expected: "SELECT sqldeep_json_object('b', :b) FROM t WHERE a = :a"
+    expected_postgres: "SELECT jsonb_build_object('b', :b) FROM t WHERE a = :a"
+
+  - name: param numbered survives from-first reorder
+    input: "FROM t WHERE a = ?1 SELECT { b: ?2 }"
+    expected: "SELECT sqldeep_json_object('b', ?2) FROM t WHERE a = ?1"
+    expected_postgres: "SELECT jsonb_build_object('b', ?2) FROM t WHERE a = ?1"
+
+  - name: param dollar-numbered survives from-first reorder
+    input: "FROM t WHERE a = $1 SELECT { b: $2 }"
+    expected: "SELECT sqldeep_json_object('b', $2) FROM t WHERE a = $1"
+    expected_postgres: "SELECT jsonb_build_object('b', $2) FROM t WHERE a = $1"
+
+  - name: param positional in where
+    input: "SELECT { id } FROM t WHERE id = ?"
+    expected: "SELECT sqldeep_json_object('id', id) FROM t WHERE id = ?"
+    expected_postgres: "SELECT jsonb_build_object('id', id) FROM t WHERE id = ?"
+
+  - name: param positional in object
+    input: "SELECT { a: ?, b: ? } FROM t"
+    expected: "SELECT sqldeep_json_object('a', ?, 'b', ?) FROM t"
+    expected_postgres: "SELECT jsonb_build_object('a', ?, 'b', ?) FROM t"
+
+  - name: param positional projection then clause order preserved
+    input: "SELECT { x: ? } FROM t WHERE y = ?"
+    expected: "SELECT sqldeep_json_object('x', ?) FROM t WHERE y = ?"
+    expected_postgres: "SELECT jsonb_build_object('x', ?) FROM t WHERE y = ?"
+
+  - name: param positional from-first clause only
+    input: "FROM t WHERE a = ? SELECT { b }"
+    expected: "SELECT sqldeep_json_object('b', b) FROM t WHERE a = ?"
+    expected_postgres: "SELECT jsonb_build_object('b', b) FROM t WHERE a = ?"
+
+  - name: param question mark inside string literal untouched
+    input: "SELECT { msg: 'what?' } FROM t WHERE id = ?"
+    expected: "SELECT sqldeep_json_object('msg', 'what?') FROM t WHERE id = ?"
+    expected_postgres: "SELECT jsonb_build_object('msg', 'what?') FROM t WHERE id = ?"
+
+  - name: param positional with cte not reordered
+    input: "WITH x AS (SELECT a FROM t WHERE a = ?) SELECT { b } FROM t WHERE b = ?"
+    expected: "WITH x AS (SELECT a FROM t WHERE a = ?) SELECT sqldeep_json_object('b', b) FROM t WHERE b = ?"
+    expected_postgres: "WITH x AS (SELECT a FROM t WHERE a = ?) SELECT jsonb_build_object('b', b) FROM t WHERE b = ?"
+
 # ── FK-guided join resolution ────────────────────────────────────────
 
 fk:
@@ -1043,6 +1108,21 @@ errors:
 
   - name: xml unterminated interpolation
     input: "<div>{expr</div>"
+
+  # Bare "?" reordered by a rewrite: a FROM-first SELECT moves its
+  # projection ahead of the FROM/WHERE clauses, so a "?" on both sides
+  # would be misbound. Sqldeep refuses rather than emit wrong SQL.
+  - name: param positional reordered by from-first object
+    input: "FROM t WHERE a = ? SELECT { b: ? }"
+
+  - name: param positional reordered by from-first array
+    input: "FROM t WHERE a = ? SELECT [?]"
+
+  - name: param positional reordered by from-first limit
+    input: "FROM t LIMIT ? SELECT { x: ? }"
+
+  - name: param positional reordered nested in projection
+    input: "SELECT { x: ?, items: (FROM t WHERE q = ? SELECT [?]) } FROM t"
 
 # ── FK-guided error cases ────────────────────────────────────────────
 

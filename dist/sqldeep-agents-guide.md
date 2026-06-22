@@ -217,6 +217,10 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - `--` line comments and `/* ... */` block comments are stripped.
 - Trailing commas are allowed in objects and arrays.
 - SQL without `{ }`, `[ ]`, or `<tag>` constructs passes through unchanged.
+- Bind parameters pass through: named (`:name`, `@name`, `$name`) and numbered
+  (`?1`, `$1`) bind by name/index, so they survive any rewrite. Bare `?` binds
+  by textual position, so sqldeep guarantees its left-to-right order is
+  preserved — and **errors** if a rewrite would reorder it (see Gotchas).
 
 ## Gotchas
 
@@ -237,6 +241,12 @@ Both SELECT-first and FROM-first syntax are supported (identical output):
 - **FK-guided mode is strict.** When FK metadata is provided, every join
   must be resolvable from it — no fallback to the `<table>_id` convention.
   Multiple FKs between the same table pair cause an ambiguity error.
+- **Positional `?` order.** SQLite/PostgreSQL number bare `?` placeholders by
+  textual position, so the caller binds them in order. sqldeep guarantees the
+  output preserves that order; a rewrite that would reorder it (e.g. a
+  FROM-first `SELECT` with a `?` in both the projection and the FROM/WHERE
+  clauses) returns an error instead of silently misbinding. Prefer named
+  (`:name`) or numbered (`?1`) parameters, which are immune to reordering.
 - **Free returned strings.** All strings returned by `sqldeep_transpile*`
   (including error messages) must be freed with `sqldeep_free()`.
 

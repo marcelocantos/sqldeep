@@ -18,6 +18,7 @@ extern "C" {
 #include "arena.h"
 }
 
+#include <algorithm>
 #include <climits>
 #include <cstdint>
 #include <cstdio>
@@ -216,6 +217,97 @@ LpNode *make_limit(arena_t *arena, int count) {
     std::snprintf(buf, sizeof(buf), "%d", count);
     n->u.limit.count = make_int_lit(arena, buf);
     return n;
+}
+
+// ── Positional-parameter order preservation ─────────────────────────
+//
+// Anonymous positional parameters ("?") are order-sensitive: SQLite and
+// PostgreSQL number them by left-to-right textual position, so the Nth
+// "?" in the caller's input must remain the Nth "?" in the transpiled
+// output, or the caller's bound values silently land on the wrong
+// placeholders. Sqldeep's rewrites can move expressions around (most
+// obviously the FROM-first SELECT, whose projection is authored last but
+// emitted first), so we must guarantee the order survives — or refuse.
+//
+// Rather than reason about which rewrite reorders what, we verify it
+// empirically: before transforming, every "?" is renamed to a unique
+// sentinel named parameter (":__sqldeep_param_<N>__") in source order.
+// Transforms move AST nodes by kind and structure, never by variable
+// name, so each sentinel lands exactly where its "?" would have. After
+// unparsing we read the sentinels back out of the output; if they don't
+// appear exactly once each, in ascending order, a rewrite reordered
+// (or dropped/duplicated) the parameters and we raise an error.
+// Otherwise the sentinels are substituted back to "?".
+//
+// Numbered ("?N") and named (":x" / "@x" / "$x") parameters bind by
+// explicit index or name, so their position is irrelevant; they are left
+// untouched and pass through unharmed.
+constexpr const char *kPosParamPrefix = ":__sqldeep_param_";
+constexpr const char *kPosParamSuffix = "__";
+
+// Collect every anonymous "?" variable node in a statement.
+void collect_anon_params(LpNode *root, std::vector<LpNode*>& out) {
+    struct Ctx { LpVisitor v; std::vector<LpNode*> *out; } ctx{};
+    ctx.v.user_data = &ctx;
+    ctx.out = &out;
+    ctx.v.enter = [](LpVisitor *v, LpNode *nd) -> int {
+        if (nd->kind == LP_EXPR_VARIABLE && nd->u.variable.name
+            && std::strcmp(nd->u.variable.name, "?") == 0) {
+            static_cast<Ctx*>(v->user_data)->out->push_back(nd);
+        }
+        return 0;
+    };
+    ctx.v.leave = nullptr;
+    lp_ast_walk(root, &ctx.v);
+}
+
+// Rename every "?" across all statements to a sentinel named parameter
+// numbered 1..N in source (byte-offset) order. Returns N.
+int mark_positional_params(LpNodeList *stmts, arena_t *arena) {
+    std::vector<LpNode*> params;
+    for (int i = 0; i < stmts->count; i++)
+        collect_anon_params(stmts->items[i], params);
+    std::sort(params.begin(), params.end(), [](LpNode *a, LpNode *b) {
+        return a->pos.offset < b->pos.offset;
+    });
+    for (size_t i = 0; i < params.size(); i++) {
+        std::string name = kPosParamPrefix + std::to_string(i + 1)
+                         + kPosParamSuffix;
+        params[i]->u.variable.name = arena_str(arena, name);
+    }
+    return static_cast<int>(params.size());
+}
+
+// Verify the N sentinels appear exactly once each, in ascending order,
+// in the transpiled output; throw if a rewrite reordered them. On
+// success, substitute each sentinel back to "?".
+void restore_positional_params(std::string& sql, int count) {
+    if (count == 0) return;
+    const std::string prefix = kPosParamPrefix;
+    std::vector<int> order;
+    for (size_t pos = 0; (pos = sql.find(prefix, pos)) != std::string::npos;) {
+        size_t num = pos + prefix.size();
+        size_t end = num;
+        while (end < sql.size() && sql[end] >= '0' && sql[end] <= '9') end++;
+        order.push_back(std::atoi(sql.substr(num, end - num).c_str()));
+        pos = end;
+    }
+    bool ok = (static_cast<int>(order.size()) == count);
+    for (int i = 0; ok && i < count; i++) ok = (order[i] == i + 1);
+    if (!ok) {
+        throw Error("cannot preserve positional parameter (?) order: a "
+                    "rewrite reordered the '?' placeholders, which would "
+                    "misbind the caller's values. Use named (:name) or "
+                    "numbered (?1) parameters instead.", 0, 0);
+    }
+    for (int n = 1; n <= count; n++) {
+        std::string marker = prefix + std::to_string(n) + kPosParamSuffix;
+        for (size_t pos = 0;
+             (pos = sql.find(marker, pos)) != std::string::npos;) {
+            sql.replace(pos, marker.size(), "?");
+            pos += 1;
+        }
+    }
 }
 
 // ── Transformer ─────────────────────────────────────────────────────
@@ -1532,6 +1624,11 @@ std::string transpile_impl(const std::string& input,
         bare_expr = true;
     }
 
+    // Rename "?" placeholders to ordered sentinels so we can verify the
+    // transform preserves their order before handing SQL back (restored
+    // to "?" after the check). See mark_positional_params.
+    int pos_param_count = mark_positional_params(stmts, arena);
+
     FkIndex fk_index;
     if (fks) fk_index = build_fk_index(*fks);
 
@@ -1570,6 +1667,11 @@ std::string transpile_impl(const std::string& input,
     }
 
     arena_destroy(arena);
+
+    // Verify "?" order survived the rewrite and restore the placeholders
+    // (throws if a rewrite reordered them). The arena is already gone;
+    // this works purely on the output string.
+    restore_positional_params(out, pos_param_count);
     return out;
 }
 

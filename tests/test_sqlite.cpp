@@ -237,3 +237,71 @@ TEST_CASE("sqlite integration") {
         }
     }
 }
+
+// ── Bind-parameter integration ──────────────────────────────────────
+//
+// The YAML cases prove the transpiled text is correct; these prove the
+// restored "?" placeholders actually bind by position end-to-end, and
+// that an order-destroying rewrite is rejected before it can misbind.
+
+namespace {
+
+// Run a single-column query with positional text bindings applied left
+// to right, returning the lone result cell.
+std::string query_bound(sqlite3* db, const std::string& sql,
+                         const std::vector<std::string>& binds) {
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+        throw std::runtime_error(
+            std::string("prepare: ") + sqlite3_errmsg(db) + "\nSQL: " + sql);
+    for (size_t i = 0; i < binds.size(); ++i)
+        sqlite3_bind_text(stmt, static_cast<int>(i + 1), binds[i].c_str(),
+                          -1, SQLITE_TRANSIENT);
+    std::string out = "NULL";
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        auto* text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        if (text) out = text;
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("positional parameters bind by source order") {
+    Db g;
+    exec(g.db, "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
+    exec(g.db, "INSERT INTO t VALUES (1, 'alice'), (2, 'bob')");
+
+    SUBCASE("placeholder in WHERE binds the filter") {
+        auto sql = transpile_str("SELECT { id, name } FROM t WHERE id = ?");
+        CHECK(query_bound(g.db, sql, {"2"}) == R"({"id":2,"name":"bob"})");
+    }
+
+    SUBCASE("projection then clause keeps left-to-right binding") {
+        // The first "?" is the projection value, the second is the filter.
+        // If the rewrite swapped them, lo/hi and the row would be wrong.
+        auto sql = transpile_str("SELECT { lo: ?, hi: ? } FROM t WHERE id = ?");
+        CHECK(query_bound(g.db, sql, {"A", "B", "1"})
+              == R"({"lo":"A","hi":"B"})");
+    }
+
+    SUBCASE("from-first numbered parameters bind by index after reorder") {
+        // ?1 is the filter (authored first), ?2 the projection (emitted
+        // first). Numbered params bind by index regardless of position.
+        auto sql = transpile_str("FROM t WHERE id = ?1 SELECT { tag: ?2 }");
+        CHECK(query_bound(g.db, sql, {"2", "x"}) == R"({"tag":"x"})");
+    }
+
+    SUBCASE("order-destroying rewrite is rejected, not silently wrong") {
+        char* err = nullptr;
+        int line = 0, col = 0;
+        char* out = sqldeep_transpile("FROM t WHERE id = ? SELECT { tag: ? }",
+                                      &err, &line, &col);
+        CHECK(out == nullptr);
+        REQUIRE(err != nullptr);
+        CHECK(std::string(err).find("positional parameter")
+              != std::string::npos);
+        sqldeep_free(err);
+    }
+}
