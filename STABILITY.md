@@ -24,7 +24,7 @@ Experimental to Stable is a one-way door.
 
 ## Interaction surface catalogue
 
-Snapshot as of v0.21.0.
+Snapshot as of v0.23.0.
 
 ### C API (`sqldeep.h`)
 

@@ -266,6 +266,16 @@ counterparts) are runtime concerns — sqldeep only emits calls to them. The
 - `--` line comments and `/* ... */` block comments are stripped
 - Trailing commas are allowed in objects and arrays
 
+### Bind parameters
+
+Bind parameters pass through to the output. Named (`:name`, `@name`, `$name`)
+and numbered (`?1`, `$1`) parameters bind by name or index, so they survive any
+rewrite. A bare `?` binds by left-to-right position, so sqldeep preserves its
+order — and if a rewrite would reorder positional `?` (for example, a FROM-first
+`SELECT` with a `?` in both the projection and the `WHERE` clause), the
+transpile **fails** rather than silently misbind your values. Prefer named or
+numbered parameters when placeholders span multiple clauses.
+
 ### SQL passthrough
 
 Any SQL that doesn't contain `{ }` or `[ ]` constructs passes through
@@ -303,13 +313,25 @@ On error, functions return `NULL` and set the `err_msg`, `err_line`, and
 `err_col` out-parameters. Free returned strings (including error messages) with
 `sqldeep_free()`.
 
+## Installing
+
+The CLI — an extended `sqlite3` shell that understands sqldeep syntax — is
+available via Homebrew:
+
+```sh
+brew install marcelocantos/tap/sqldeep
+```
+
+To embed the transpiler in your own project, copy `dist/sqldeep.h` and
+`dist/sqldeep.cpp` and compile as C++20; there are no link-time dependencies.
+
 ## Building
 
 ```sh
 git clone https://github.com/marcelocantos/sqldeep.git
 cd sqldeep
 cv test     # run tests
-mk example  # run the demo
+cv example  # run the demo
 ```
 
 Requires C++20 and [cv](https://github.com/marcelocantos/cv).
