@@ -119,3 +119,8 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 - **Commit**: `be78fca` (PR #19) + release prep
 - **Outcome**: Released v0.22.0 (darwin-arm64, linux-amd64, linux-arm64). Replaced the hand-written `Lexer` / `Parser` / `SqlParts` / `Renderer` (~2500 lines) with an AST-rewrite pipeline backed by deepparser: `lp_parse_all` → `Transformer::transform` → `lp_ast_to_sql`. Sqldeep is now ~1400 lines of dialect-specific AST mutation; deepparser handles parsing and canonical printing. The C API and the documented sqldeep input/output syntax are unchanged. Pre-existing latent-bug classes from the old text-based parser (CTE unmatched-paren, exotic SQL forms it didn't understand) are eliminated. 650 assertions pass (10 test cases). 🎯T9 ("SQLite-backend transpile parses input via deepparser AST") achieved.
+
+## 2026-06-28 — /release v0.23.0
+
+- **Commit**: PR (param-order-preservation) + release prep
+- **Outcome**: Released v0.23.0 (darwin-arm64, linux-amd64, linux-arm64). Added positional-parameter order preservation: bare `?` placeholders are renamed to ordered sentinels before transform and their output order is verified, so a rewrite that would reorder `?` (e.g. a FROM-first SELECT with `?` in both projection and FROM/WHERE) now errors instead of silently misbinding; named (`:x`/`@x`/`$x`) and numbered (`?N`/`$N`) params pass through untouched. Also bundles the mk→cv build migration (#22), deepparser dependency bump (#21), and CI Node-major bump (#23) that landed since v0.22.0. Tests in testdata/transpile.yaml (run by C++ + Go) and tests/test_sqlite.cpp. 696 assertions pass (11 test cases). Raised 🎯T6 (CLI should surface transform errors rather than fall through to a misleading raw-SQL parse error).

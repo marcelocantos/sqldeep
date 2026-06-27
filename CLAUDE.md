@@ -181,6 +181,13 @@ knowledge lives in sqldeep, not in deepparser.
 - `--` line comments stripped
 - `/* ... */` block comments stripped (flat, not nested)
 - Trailing commas allowed
+- Bind parameters: named (`:name`, `@name`, `$name`) and numbered (`?1`, `$1`)
+  pass through unchanged. Bare `?` passes through with its left-to-right order
+  preserved; if a rewrite would reorder positional `?` (e.g. a FROM-first
+  `SELECT` with `?` in both projection and FROM/WHERE), transpilation errors
+  rather than silently misbind. Implemented by renaming `?` to ordered
+  sentinels before transform and verifying their output order
+  (`mark_positional_params` / `restore_positional_params`).
 
 ## File layout
 
