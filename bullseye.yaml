@@ -93,3 +93,20 @@ targets:
     context: vendor/src/shell.c (~line 24647) discards the sqldeep error (sdErr) on any transpile failure and falls through to raw SQL, so transform-stage errors surface as confusing SQLite parse errors. Discovered while adding positional-parameter order-preservation (the new guard's clear message is lost in the CLI). The fix must distinguish a parse failure (should fall through) from a transform rejection (should surface) — the C API does not currently expose which stage failed, so this may need an API or heuristic (e.g. surface sdErr only when the raw prepare also fails).
     origin: manual
     discovered: 2026-06-22
+  T7:
+    name: sqldeep's confirmed Fable-audit defects are remediated (identifier injection, NULL/crash safety, fail-open transpile)
+    status: identified
+    value: 0.0
+    cost: 0.0
+    acceptance:
+    - 'F1: RECURSE rewrite emits identifiers only via the trusted unparser (no raw string splicing); all identifiers round-trip verbatim and no crafted identifier can alter the re-parsed CTE structure.'
+    - 'F2: all XML/JSON runtime functions (and the Swift/Kotlin ports) survive SQL-NULL in any tag/name/key slot with a defined error or defined output, never a process crash; verified across all six drivers.'
+    - 'F3: bare-expression transpilation never returns empty/clause-stripped SQL as success — non-unwrappable input yields the original parse error (NULL + err_msg) and the CLI surfaces syntax errors instead of a silent exit-0 no-op.'
+    - 'F4: RECURSE produces well-formed, correctly-nested JSON for all supported PK types (negative and 64-bit integers), with non-integer PKs explicitly rejected rather than silently corrupted.'
+    - 'The 6 finder-only candidates (FO1-FO6: attribute-buffer sizing, realloc-failure handling, NULL C-API input, C++ exception escape across FFI/cgo/JNI/Swift, per-statement alias scoping, escaped-length int-overflow) are completed through two-lens verification and any confirmed are remediated.'
+    context: 'Fable-5 deep audit 2026-07; 4 HIGH findings two-lens confirmed, 0 critical, 0 refuted. Six additional finder-only candidates were throttled and need verification first. Full report: docs/audit/fable-2026-07.md.'
+    tags:
+    - fable-audit
+    - security
+    origin: manual
+    discovered: 2026-07-08
