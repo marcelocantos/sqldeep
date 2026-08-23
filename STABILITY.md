@@ -328,13 +328,13 @@ Before 1.0:
   `json('true')`/`json('false')` to `sqldeep_json('true')`/`sqldeep_json('false')`
   to return BLOB instead of TEXT. Only applies to single-token values, not
   compound expressions.
-- **Swift binding settling**: New in v0.20.0. Pure Swift port of all runtime
-  functions plus `CSQLDeep` transpiler wrapper. API mirrors the C and Go bindings.
+- **Swift binding settling**: New in v0.20.0. Swift Package links
+  `dist/sqldeep_xml.c` for the runtime plus `CSQLDeep` transpiler wrapper.
   Tested on macOS (SPM) and iOS Simulator. Needs real-world usage to confirm API
   ergonomics and that the BLOB protocol works correctly through Swift's `Data`/
   `sqlite3_result_blob` path.
 - **Kotlin/Android binding settling**: New in v0.20.0. JNI bridge to the C
-  transpiler plus pure Kotlin port of all runtime functions. Tested on Android
+  transpiler and `sqldeep_xml.c` runtime. Tested on Android
   device/emulator and JVM desktop. Needs real-world usage to confirm JNI
   marshaling is correct for all edge cases (multi-column FKs, large inputs,
   error paths).
