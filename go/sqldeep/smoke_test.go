@@ -23,6 +23,7 @@ type sqliteTestCase struct {
 	RawSQL           string         `yaml:"raw_sql"`
 	Expected         []string       `yaml:"expected"`
 	ExpectedContains []string       `yaml:"expected_contains"`
+	ErrorContains    string         `yaml:"error_contains"`
 	FKs              []yamlFK       `yaml:"fks"`
 	Steps            []sqliteStep   `yaml:"steps"`
 }
@@ -96,6 +97,22 @@ func queryRows(t *testing.T, db *sql.DB, sqlStr string) []string {
 	return results
 }
 
+func queryErr(t *testing.T, db *sql.DB, sqlStr string) string {
+	t.Helper()
+	rows, err := db.Query(sqlStr)
+	if err != nil {
+		return err.Error()
+	}
+	defer rows.Close()
+	for rows.Next() {
+		// Drain; UDF errors may surface on Next rather than Query.
+	}
+	if err := rows.Err(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 func TestSQLiteIntegration(t *testing.T) {
 	tests := loadSQLiteTests(t)
 	for _, tc := range tests {
@@ -108,6 +125,15 @@ func TestSQLiteIntegration(t *testing.T) {
 			}
 
 			var rows []string
+			var errMsg string
+
+			runSQL := func(sqlStr string) {
+				if tc.ErrorContains != "" {
+					errMsg = queryErr(t, db, sqlStr)
+				} else {
+					rows = queryRows(t, db, sqlStr)
+				}
+			}
 
 			switch {
 			case len(tc.Steps) > 0:
@@ -125,30 +151,34 @@ func TestSQLiteIntegration(t *testing.T) {
 						if err != nil {
 							t.Fatalf("Transpile query: %v", err)
 						}
-						rows = queryRows(t, db, sql)
+						runSQL(sql)
 					}
 				}
 
 			case tc.RawSQL != "":
-				rows = queryRows(t, db, tc.RawSQL)
+				runSQL(tc.RawSQL)
 
 			case len(tc.FKs) > 0:
 				sql, err := TranspileFK(tc.Input, toFKs(tc.FKs))
 				if err != nil {
 					t.Fatalf("TranspileFK: %v", err)
 				}
-				rows = queryRows(t, db, sql)
+				runSQL(sql)
 
 			default:
 				sql, err := Transpile(tc.Input)
 				if err != nil {
 					t.Fatalf("Transpile: %v", err)
 				}
-				rows = queryRows(t, db, sql)
+				runSQL(sql)
 			}
 
 			// Verify
-			if len(tc.ExpectedContains) > 0 {
+			if tc.ErrorContains != "" {
+				if !strings.Contains(errMsg, tc.ErrorContains) {
+					t.Errorf("expected error containing %q, got %q", tc.ErrorContains, errMsg)
+				}
+			} else if len(tc.ExpectedContains) > 0 {
 				if len(rows) != 1 {
 					t.Fatalf("expected 1 row, got %d", len(rows))
 				}

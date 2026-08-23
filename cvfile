@@ -10,10 +10,11 @@ dp_srcdir   = $dp_dir/src
 dp_incflags = -I$dp_srcdir
 dp_cflags   = -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -O2 -DNDEBUG
 
-# Platform-dependent readline paths
+# CLI line editing only (not linked into libsqldeep.a).
+# Darwin: stock SDK libedit. Linux: system libreadline (libreadline-dev).
 lazy os = $[shell uname -s]
-lazy rl_incflags = $[shell if [ "$os" = Darwin ]; then echo "-I/opt/homebrew/opt/readline/include"; fi]
-lazy rl_ldflags  = $[shell if [ "$os" = Darwin ]; then echo "-L/opt/homebrew/opt/readline/lib"; fi]
+lazy rl_cflags  = $[shell if [ "$os" = Darwin ]; then echo "-DHAVE_EDITLINE=1"; else echo "-DHAVE_READLINE=1"; fi]
+lazy rl_ldflags = $[shell if [ "$os" = Darwin ]; then echo "-ledit"; else echo "-lreadline"; fi]
 
 # ── Static library ───────────────────────────────────────────────
 lib            = build/libsqldeep.a
@@ -57,7 +58,7 @@ build/demo: build/examples/demo.o build/sqldeep.o $lib_deepparser
     $cxx $cxxflags -o $target $inputs
 
 build/sqldeep: build/cmd/sqldeep.o build/sqldeep.o build/sqldeep_xml.o build/sqlite3.o $lib_deepparser
-    $cxx -o $target $inputs $rl_ldflags -lreadline -lz
+    $cxx -o $target $inputs $rl_ldflags -lz
 
 $lib: build/sqldeep.o $dp_objs
     ar rcs $target $inputs
@@ -85,4 +86,8 @@ build/examples/{name}.o: examples/{name}.cpp
     $cxx $cxxflags $incflags -c $input -o $target
 
 build/cmd/{name}.o: cmd/{name}.c
-    $cc -w $incflags -I$vendor/src -DHAVE_READLINE=1 $rl_incflags -c $input -o $target
+    $cc -w $incflags -I$vendor/src $rl_cflags -c $input -o $target
+
+# shell.c is #included by cmd/sqldeep.c — rebuild when the patch changes.
+build/cmd/sqldeep.o: cmd/sqldeep.c $vendor/src/shell.c dist/sqldeep.h dist/sqldeep_xml.h
+    $cc -w $incflags -I$vendor/src $rl_cflags -c $input -o $target

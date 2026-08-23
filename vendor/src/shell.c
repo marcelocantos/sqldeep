@@ -24631,6 +24631,7 @@ static int shell_exec(
 
   /* ── sqldeep patch: transpile input ── */
 #ifdef SQLDEEP_SHELL
+  char *sdHeldErr = 0;
   {
     static int sdInTranspile = 0;
     if( !sdInTranspile ){
@@ -24644,15 +24645,21 @@ static int shell_exec(
         sqldeep_free(zTranspiled);
         return rc_inner;
       }
-      /* Transpile failed — fall through to raw SQL so dot-command
-      ** fragments and EXPLAIN etc. still work. */
-      if( sdErr ) sqldeep_free(sdErr);
+      /* Transpile failed. Hold sdErr: if raw prepare also fails,
+      ** surface the sqldeep message (transform rejections are opaque
+      ** to SQLite and otherwise become a misleading syntax error).
+      ** If prepare succeeds, discard — genuine non-sqldeep SQL /
+      ** EXPLAIN that deepparser rejected. */
+      sdHeldErr = sdErr;
     }
   }
 #endif
 
 #ifndef SQLITE_OMIT_VIRTUALTABLE
   if( pArg->expert.pExpert ){
+#ifdef SQLDEEP_SHELL
+    if( sdHeldErr ){ sqldeep_free(sdHeldErr); sdHeldErr = 0; }
+#endif
     rc = expertHandleSQL(pArg, zSql, pzErrMsg);
     return expertFinish(pArg, (rc!=SQLITE_OK), pzErrMsg);
   }
@@ -24663,9 +24670,29 @@ static int shell_exec(
     rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, &zLeftover);
     if( SQLITE_OK != rc ){
       if( pzErrMsg ){
+#ifdef SQLDEEP_SHELL
+        if( sdHeldErr ){
+          *pzErrMsg = sqlite3_mprintf("%s", sdHeldErr);
+          sqldeep_free(sdHeldErr);
+          sdHeldErr = 0;
+        }else
+#endif
         *pzErrMsg = save_err_msg(db, "in prepare", rc, zSql);
       }
+#ifdef SQLDEEP_SHELL
+      else if( sdHeldErr ){
+        sqldeep_free(sdHeldErr);
+        sdHeldErr = 0;
+      }
+#endif
     }else{
+#ifdef SQLDEEP_SHELL
+      if( sdHeldErr && pStmt ){
+        /* Raw SQL prepared — fall through was correct. */
+        sqldeep_free(sdHeldErr);
+        sdHeldErr = 0;
+      }
+#endif
       if( !pStmt ){
         /* this happens for a comment or white-space */
         zSql = zLeftover;
@@ -24780,6 +24807,9 @@ static int shell_exec(
     }
   } /* end while */
 
+#ifdef SQLDEEP_SHELL
+  if( sdHeldErr ) sqldeep_free(sdHeldErr);
+#endif
   return rc;
 }
 

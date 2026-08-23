@@ -42,7 +42,8 @@ android {
 
     sourceSets {
         getByName("androidTest") {
-            assets.srcDirs("src/androidTest/assets")
+            // Read testdata/sqlite.yaml directly — no private copy to drift.
+            assets.srcDirs("../testdata")
         }
     }
 }

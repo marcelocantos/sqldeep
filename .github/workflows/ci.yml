@@ -28,3 +28,28 @@ jobs:
 
       - name: Build and run tests
         run: cv test
+
+      - name: Enforce sources of truth (ENT-009 / T10)
+        run: scripts/check_sources_of_truth.sh
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: go/sqldeep/go.sum
+
+      - name: Go binding tests (go/sqldeep)
+        working-directory: go/sqldeep
+        run: |
+          echo "CI: go test ./... in go/sqldeep (cgo sources + deepparser)"
+          GOWORK=off go test -count=1 ./...
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Kotlin JNI CMake (deepparser required)
+        run: |
+          echo "CI: cmake configure+build kotlin/src/main/jni (fails without deepparser)"
+          cmake -S kotlin/src/main/jni -B build/jni-ci -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/jni-ci -j "$(nproc 2>/dev/null || sysctl -n hw.ncpu)"

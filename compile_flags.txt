@@ -4,3 +4,4 @@
 -Wpedantic
 -I.
 -Ivendor/include
+-Ivendor/deepparser/src

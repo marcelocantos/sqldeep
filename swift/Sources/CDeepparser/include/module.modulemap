@@ -1,0 +1,4 @@
+module CDeepparser {
+    header "cdeepparser.h"
+    export *
+}

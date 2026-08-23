@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package sqldeep transpiles JSON5-like SQL syntax to standard SQL with
-// database-specific JSON functions (SQLite or PostgreSQL).
+// database-specific JSON functions (SQLite runtime; PostgreSQL transpile-only).
 //
 // The core function is [Transpile], which takes sqldeep syntax and returns
-// standard SQL with SQLite JSON functions. For PostgreSQL output, use
-// [TranspilePostgres] or the general [TranspileBackend].
+// standard SQL with SQLite JSON functions. For PostgreSQL output strings
+// (no in-repo PG execution oracle), use [TranspilePostgres] or the general
+// [TranspileBackend].
 //
 // For schemas with explicit foreign key metadata, use [TranspileFK] (or
 // [TranspileFKPostgres] / [TranspileFKBackend]) to resolve join paths from
 // provided FK definitions instead of the default naming convention.
 //
-// This package wraps the C++ sqldeep library via cgo. It requires the
-// static library (build/libsqldeep.a) to be built before `go build`.
+// This package wraps the C++ sqldeep library via cgo. On a full repo
+// checkout it compiles dist/sqldeep.cpp plus the five deepparser C
+// sources under vendor/deepparser/src (same contract as cv lib).
 package sqldeep

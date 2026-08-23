@@ -19,6 +19,7 @@ struct SQLiteTestCase: Decodable {
     let raw_sql: String?
     let expected: [String]?
     let expected_contains: [String]?
+    let error_contains: String?
     let fks: [FKDef]?
     let steps: [StepDef]?
 }
@@ -71,18 +72,26 @@ func queryRows(_ db: OpaquePointer, _ sql: String) throws -> [String] {
     defer { sqlite3_finalize(stmt) }
 
     var rows: [String] = []
-    while sqlite3_step(stmt) == SQLITE_ROW {
-        if sqlite3_column_type(stmt, 0) == SQLITE_BLOB {
-            let n = sqlite3_column_bytes(stmt, 0)
-            if n > 0, let p = sqlite3_column_blob(stmt, 0) {
-                rows.append(String(data: Data(bytes: p, count: Int(n)), encoding: .utf8) ?? "")
+    while true {
+        let rc = sqlite3_step(stmt)
+        if rc == SQLITE_ROW {
+            if sqlite3_column_type(stmt, 0) == SQLITE_BLOB {
+                let n = sqlite3_column_bytes(stmt, 0)
+                if n > 0, let p = sqlite3_column_blob(stmt, 0) {
+                    rows.append(String(data: Data(bytes: p, count: Int(n)), encoding: .utf8) ?? "")
+                } else {
+                    rows.append("")
+                }
+            } else if let text = sqlite3_column_text(stmt, 0) {
+                rows.append(String(cString: text))
             } else {
-                rows.append("")
+                rows.append("NULL")
             }
-        } else if let text = sqlite3_column_text(stmt, 0) {
-            rows.append(String(cString: text))
+        } else if rc == SQLITE_DONE {
+            break
         } else {
-            rows.append("NULL")
+            throw NSError(domain: "SQLite", code: Int(rc),
+                          userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
     }
     return rows
@@ -116,7 +125,7 @@ final class SQLiteIntegrationTests: XCTestCase {
         let yamlStr = try String(contentsOf: url, encoding: .utf8)
         let tests = try YAMLDecoder().decode([SQLiteTestCase].self, from: yamlStr)
 
-        XCTAssertEqual(tests.count, 79, "expected 79 test cases in sqlite.yaml")
+        XCTAssertEqual(tests.count, 89, "expected 89 test cases in sqlite.yaml")
 
         for tc in tests {
             let db = try openDB()
@@ -133,34 +142,52 @@ final class SQLiteIntegrationTests: XCTestCase {
             }
 
             // Determine the query SQL and execute.
-            var rows: [String]
+            var rows: [String] = []
+            var errMsg = ""
 
-            if let rawSQL = tc.raw_sql {
-                // raw_sql: execute directly, no transpilation.
-                rows = try queryRows(db, rawSQL)
-            } else if let steps = tc.steps {
-                // Multi-step test: transpile and execute each step.
-                rows = []
-                for step in steps {
-                    if let execInput = step.transpile_exec {
-                        let sql = try transpile(execInput, fks: tc.fks)
-                        try execSQL(db, sql)
-                    } else if let queryInput = step.transpile_query {
-                        let sql = try transpile(queryInput, fks: tc.fks)
-                        rows = try queryRows(db, sql)
+            func runSQL(_ sql: String) throws {
+                if tc.error_contains != nil {
+                    do {
+                        _ = try queryRows(db, sql)
+                        errMsg = ""
+                    } catch {
+                        errMsg = "\(error)"
                     }
+                } else {
+                    rows = try queryRows(db, sql)
                 }
-            } else if let input = tc.input {
-                // Standard: transpile input and query.
-                let sql = try transpile(input, fks: tc.fks)
-                rows = try queryRows(db, sql)
-            } else {
-                XCTFail("\(tc.name): no input, raw_sql, or steps")
+            }
+
+            do {
+                if let rawSQL = tc.raw_sql {
+                    try runSQL(rawSQL)
+                } else if let steps = tc.steps {
+                    for step in steps {
+                        if let execInput = step.transpile_exec {
+                            let sql = try transpile(execInput, fks: tc.fks)
+                            try execSQL(db, sql)
+                        } else if let queryInput = step.transpile_query {
+                            let sql = try transpile(queryInput, fks: tc.fks)
+                            try runSQL(sql)
+                        }
+                    }
+                } else if let input = tc.input {
+                    let sql = try transpile(input, fks: tc.fks)
+                    try runSQL(sql)
+                } else {
+                    XCTFail("\(tc.name): no input, raw_sql, or steps")
+                    continue
+                }
+            } catch {
+                XCTFail("\(tc.name): \(error)")
                 continue
             }
 
             // Verify results.
-            if let expected = tc.expected {
+            if let needle = tc.error_contains {
+                XCTAssertTrue(errMsg.contains(needle),
+                              "\(tc.name): expected error containing \"\(needle)\", got \"\(errMsg)\"")
+            } else if let expected = tc.expected {
                 XCTAssertEqual(rows.count, expected.count,
                                "\(tc.name): row count mismatch (got \(rows.count), want \(expected.count))")
                 for (i, want) in expected.enumerated() {

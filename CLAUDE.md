@@ -1,14 +1,15 @@
 # sqldeep
 
 Transpiler for JSON5-like SQL syntax to standard SQL with database-specific
-JSON functions. Supports SQLite (default) and PostgreSQL backends.
+JSON functions. SQLite is the supported runtime backend (default); PostgreSQL
+is transpile-only (`expected_postgres` string goldens, no PG execution oracle).
 Single public C header (`sqldeep.h`) with implementation in `sqldeep.cpp`.
 
 ## Build
 
 ```sh
 cv test     # build and run all tests
-mk example  # build and run examples/demo.cpp
+cv example  # build and run examples/demo.cpp
 cv clean    # remove build/
 ```
 
@@ -205,7 +206,8 @@ cvfile                      Build system (cv)
 ## Tests
 
 - `test_transpile.cpp` — end-to-end transpilation for both SQLite and PostgreSQL
-  backends: basic objects, renamed fields, trailing commas, inline arrays,
+  emitters (PostgreSQL is transpile-only: `expected_postgres` string goldens):
+  basic objects, renamed fields, trailing commas, inline arrays,
   nested subqueries (2- and 3-level), mixed array/object nesting, comments, SQL
   passthrough, key escaping, nesting depth limits, auto-join (`->`), reverse
   join (`<-`), join path chains (grandchild, bridge/many-to-many, three-step),

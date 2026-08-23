@@ -28,6 +28,7 @@ class SQLiteIntegrationTest {
         val rawSql: String?,
         val expected: List<String>,
         val expectedContains: List<String>,
+        val errorContains: String?,
         val fks: List<ForeignKey>,
         val steps: List<Step>
     )
@@ -78,6 +79,7 @@ class SQLiteIntegrationTest {
                 rawSql = m["raw_sql"] as? String,
                 expected = @Suppress("UNCHECKED_CAST") ((m["expected"] as? List<Any?>)?.map { it.toString() } ?: emptyList()),
                 expectedContains = @Suppress("UNCHECKED_CAST") ((m["expected_contains"] as? List<Any?>)?.map { it.toString() } ?: emptyList()),
+                errorContains = m["error_contains"] as? String,
                 fks = fks,
                 steps = steps
             )
@@ -99,6 +101,30 @@ class SQLiteIntegrationTest {
                 // Setup
                 for (sql in tc.setup) {
                     SQLDeepTestHelper.execSQL(db, sql)
+                }
+
+                if (tc.errorContains != null) {
+                    val sql = when {
+                        tc.rawSql != null -> tc.rawSql
+                        tc.input != null -> {
+                            if (tc.fks.isNotEmpty()) SQLDeep.transpileFK(tc.input, tc.fks)
+                            else SQLDeep.transpile(tc.input)
+                        }
+                        else -> {
+                            failures.add("${tc.name}: no input/raw_sql for error case")
+                            continue
+                        }
+                    }
+                    try {
+                        SQLDeepTestHelper.queryRows(db, sql)
+                        failures.add("${tc.name}: expected error containing '${tc.errorContains}', got success")
+                    } catch (e: Exception) {
+                        val msg = e.message ?: ""
+                        if (tc.errorContains !in msg) {
+                            failures.add("${tc.name}: expected error containing '${tc.errorContains}', got '$msg'")
+                        }
+                    }
+                    continue
                 }
 
                 val rows: Array<String> = when {

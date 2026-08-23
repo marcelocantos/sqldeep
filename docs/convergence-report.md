@@ -1,5 +1,10 @@
 # Convergence Report
 
+> **Historical snapshot (v0.21.0).** Evaluated 2026-04-08 against release
+> v0.21.0. Not a live status document — current version is in
+> `dist/sqldeep.h` (`SQLDEEP_VERSION`); active targets live in
+> `bullseye.yaml`. Retained for audit trail only.
+
 *Evaluated: 2026-04-08*
 
 Standing invariants: all green. Tests: 8 test cases, 474 assertions passing. CI: last run succeeded (master, v0.21.0 release).

@@ -3,10 +3,13 @@
 
 package sqldeep
 
-//#cgo CFLAGS: -I${SRCDIR}/../../dist -I${SRCDIR}/../../vendor/include
-//#cgo LDFLAGS: ${SRCDIR}/../../build/libsqldeep.a ${SRCDIR}/../../build/sqldeep_xml.o -lstdc++
-//#include "sqldeep.h"
-//#include <stdlib.h>
+/*
+#cgo CFLAGS: -I${SRCDIR}/../../dist -I${SRCDIR}/../../vendor/deepparser/src -I${SRCDIR}/../../vendor/include -Wno-unused-parameter -Wno-sign-compare -DNDEBUG
+#cgo CXXFLAGS: -std=c++20 -I${SRCDIR}/../../dist -I${SRCDIR}/../../vendor/deepparser/src -I${SRCDIR}/../../vendor/include -Wno-unused-parameter
+#cgo LDFLAGS: -lstdc++
+#include "sqldeep.h"
+#include <stdlib.h>
+*/
 import "C"
 import "unsafe"
 

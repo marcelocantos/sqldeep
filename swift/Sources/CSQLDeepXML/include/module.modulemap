@@ -1,0 +1,5 @@
+module CSQLDeepXML {
+    header "sqldeep_xml.h"
+    link "sqlite3"
+    export *
+}

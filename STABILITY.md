@@ -59,9 +59,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
 | Macro | Value | Stability |
 |-------|-------|-----------|
-| `SQLDEEP_VERSION` | `"0.21.0"` | **Stable** |
+| `SQLDEEP_VERSION` | `"0.23.0"` | **Stable** |
 | `SQLDEEP_VERSION_MAJOR` | `0` | **Stable** |
-| `SQLDEEP_VERSION_MINOR` | `21` | **Stable** |
+| `SQLDEEP_VERSION_MINOR` | `23` | **Stable** |
 | `SQLDEEP_VERSION_PATCH` | `0` | **Stable** |
 
 ### Go API (`go/sqldeep`)
@@ -92,8 +92,9 @@ Separate from `sqldeep.h` because it introduces a SQLite dependency.
 | `SQLDeepForeignKey` | `struct { fromTable, toTable, columns: [SQLDeepColumnPair] }` | **Experimental** |
 | `SQLDeepColumnPair` | `struct { fromColumn, toColumn }` | **Experimental** |
 
-Pure Swift port of all SQLite runtime functions (JSON, XML, JSONML, JSX).
-Wraps the C transpiler API via a `CSQLDeep` clang module.
+Thin Swift wrapper that links `dist/sqldeep_xml.c` (via `CSQLDeepXML`) for the
+SQLite runtime — same C implementation as Go/cgo and Kotlin/JNI. Wraps the C
+transpiler API via a `CSQLDeep` clang module.
 
 ### Kotlin API (`kotlin/src/main/kotlin/com/marcelocantos/sqldeep`)
 
@@ -107,8 +108,9 @@ Wraps the C transpiler API via a `CSQLDeep` clang module.
 | `ForeignKey` | `data class ForeignKey(fromTable, toTable, columns: List<ColumnPair>)` | **Experimental** |
 | `ColumnPair` | `data class ColumnPair(fromColumn, toColumn)` | **Experimental** |
 
-JNI bridge to the C transpiler. Pure Kotlin port of all SQLite runtime functions.
-Native code built via CMake (C++20). Works on Android and JVM desktop.
+JNI bridge to the C transpiler and to `dist/sqldeep_xml.c` (via
+`sqldeep_register_sqlite`). Native code built via CMake (C++20). Works on
+Android and JVM desktop.
 
 ### Input syntax (DSL)
 
@@ -231,14 +233,20 @@ The following were evaluated during the pre-1.0 period and are now settled:
   names. Resolves the JSON5 key ambiguity (issue #10).
 - **Aggregate fields** (`field: SELECT expr`): Clean reuse of SELECT keyword
   for in-scope aggregation.
-- **PostgreSQL backend**: The `sqldeep_backend` enum is extensible for future
-  backends without API changes.
+- **PostgreSQL backend (transpile-only)**: `SQLDEEP_POSTGRES` is a stable
+  emitter for `jsonb_build_object` / `jsonb_agg` / related SQL, verified by
+  string comparison against `expected_postgres` in transpile tests. It is
+  **not** a supported runtime backend: there is no CI/docker job that executes
+  sqldeep output against PostgreSQL, and no PG registration API analogous to
+  `sqldeep_register_sqlite`. The `sqldeep_backend` enum remains extensible for
+  future backends without API changes.
 - **FK-guided joins**: The `sqldeep_foreign_key` struct supports multi-column
   FKs. Ambiguous FK disambiguation (multiple FKs between the same tables) is
   handled via explicit ON/USING clauses rather than syntax extensions.
-- **Distribution**: Two-file model (`sqldeep.h` + `sqldeep.cpp`). No pkg-config
-  or CMake find-module — users copy files directly. This matches the
-  header-only library convention and keeps integration simple.
+- **Distribution**: Source embed is `dist/sqldeep.{h,cpp}` plus the five
+  deepparser C files under `vendor/deepparser/src/` (same set `cv lib`
+  archives into `build/libsqldeep.a`). No pkg-config or CMake find-module —
+  consumers compile those sources (or link the static library from `cv lib`).
 - **Error messages**: Error text is not part of the stability contract. Messages
   may be improved in minor releases.
 - **Comment syntax** (v0.7.0): Replaced `//` (JSON5-style) with SQL-standard
@@ -264,6 +272,28 @@ The following were evaluated during the pre-1.0 period and are now settled:
   valid UTF-8 and coerce to text in CLI tools and language bindings.
 
 ## Gaps and prerequisites
+
+### 1.0 readiness (settling clock) — unmet as of v0.23.0
+
+🎯T1 (v1.0.0) is **not** ready. Do not promote catalogue items to Stable or
+bump version macros to 1.0.0 until every bullet below is true:
+
+1. **Catalogue clear of Experimental / Needs review** — currently ~66
+   Experimental items remain (XML runtime, Swift/Kotlin bindings, RECURSE,
+   XML/JSONML/JSX, bind-parameter order guard, Go vanilla/auto-extension, …).
+2. **This Gaps section emptied or moved to Out of scope** — the settling
+   bullets below are still open.
+3. **Settling threshold** — N consecutive minor releases with zero breaking
+   changes (and no settling-clock reset from new Experimental surfaces). N is
+   not yet a fixed product number; even a modest N≥3 is unmet: recent minors
+   keep extending the surface (v0.17 BLOB protocol, v0.20 Swift/Kotlin,
+   v0.21 `SQLDEEP_SQLITE_VANILLA`, v0.22 deepparser AST pipeline, v0.23
+   positional-`?` order guard). Last acknowledged hard break was v0.7.0
+   (`//` comments removed); output/runtime contracts continued to shift
+   through v0.17+.
+4. **Version / release** — `SQLDEEP_VERSION` / `sqldeep_version()` are
+   `0.23.0`; no GitHub tag or release `v1.0.0`.
+5. **Issue #10** — already closed (computed key `(expr): value` in v0.6.0).
 
 Before 1.0:
 
@@ -309,9 +339,12 @@ Before 1.0:
   marshaling is correct for all edge cases (multi-column FKs, large inputs,
   error paths).
 - **Shared test architecture settling**: New in v0.20.0. `testdata/sqlite.yaml`
-  (79 cases) shared across C++, Go, Swift, and Kotlin. Adding a test case to
-  the YAML file exercises all bindings automatically. Needs confirmation that
-  the YAML schema covers all necessary test patterns.
+  (79 cases) shared across C++, Go, Swift, and Kotlin. CI gates the C++ suite
+  (`cv test`), Go (`go test` in `go/sqldeep`), and Kotlin JNI CMake compile/link;
+  Swift and Kotlin YAML drivers remain local/opt-in. Adding a test case to the
+  YAML file is picked up by every driver that is run; it is not a claim that CI
+  executes every binding. Needs confirmation that the YAML schema covers all
+  necessary test patterns.
 - **Custom JSON functions settling**: New in v0.17.0. `sqldeep_json_object`,
   `sqldeep_json_array`, `sqldeep_json_group_array`, and `sqldeep_json` replace
   the built-in SQLite `json_object`/`json_array`/`json_group_array`/`json` calls
@@ -346,11 +379,15 @@ Before 1.0:
 
 ## Known limitations
 
+- **PostgreSQL is transpile-only**: Output shape for `SQLDEEP_POSTGRES` is
+  covered by `expected_postgres` string goldens. Runtime JSON/XML behaviour
+  is only live-tested on SQLite. Callers that execute against PostgreSQL do so
+  without an in-repo execution oracle.
 - **Bracket-quoted identifiers** (`[column name]`): Not supported. The `[`
   character is used for array literals in sqldeep syntax and cannot be
   disambiguated from bracket-quoted identifiers at the lexer level. Use
   double-quoted identifiers (`"column name"`) instead — this is the SQL
-  standard and works in all supported backends.
+  standard and works for both SQLite and PostgreSQL emitters.
 
 ## Out of scope for 1.0
 

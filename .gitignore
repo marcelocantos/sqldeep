@@ -20,3 +20,4 @@ kotlin/build/
 kotlin/gradlew
 kotlin/gradlew.bat
 kotlin/gradle/
+scripts/__pycache__

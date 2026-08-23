@@ -2,8 +2,13 @@
 
 A transpiler that converts JSON5-like SQL syntax into standard SQL with
 database-specific JSON functions. Write nested JSON queries naturally; sqldeep
-rewrites them into `sqldeep_json_object()` / `jsonb_build_object()`, etc. Supports
-SQLite (default) and PostgreSQL backends.
+rewrites them into `sqldeep_json_object()` / `jsonb_build_object()`, etc.
+
+**Supported runtime backend:** SQLite (default), including the CLI and the
+shared `testdata/sqlite.yaml` execution suite. **PostgreSQL is transpile-only:**
+`SQLDEEP_POSTGRES` emits `jsonb_*` SQL that is string-compared against
+`expected_postgres` in transpile tests; there is no PostgreSQL execution oracle
+in CI and no PG equivalent of `sqldeep_register_sqlite`.
 
 ## Example
 
@@ -304,7 +309,7 @@ sqldeep_foreign_key fks[] = {{"orders", "customers", cols, 1}};
 char* sql2 = sqldeep_transpile_fk(input, fks, 1,
                                     &err_msg, &err_line, &err_col);
 
-// PostgreSQL backend:
+// PostgreSQL output (transpile-only — string-checked, not executed in CI):
 char* sql3 = sqldeep_transpile_backend(input, SQLDEEP_POSTGRES,
                                         &err_msg, &err_line, &err_col);
 ```
@@ -322,8 +327,11 @@ available via Homebrew:
 brew install marcelocantos/tap/sqldeep
 ```
 
-To embed the transpiler in your own project, copy `dist/sqldeep.h` and
-`dist/sqldeep.cpp` and compile as C++20; there are no link-time dependencies.
+To embed the transpiler, compile `dist/sqldeep.cpp` (C++20) together with the
+five deepparser C sources under `vendor/deepparser/src/` (`arena.c`,
+`liteparser.c`, `lp_tokenize.c`, `lp_unparse.c`, `parse.c`), with
+`-Idist -Ivendor/deepparser/src`. Alternatively, link `build/libsqldeep.a`
+from `cv lib`, which bundles the same objects.
 
 ## Building
 
@@ -352,8 +360,11 @@ with sqldeep transpilation and XML functions (`xml_element`, `xml_attrs`,
 
 ### C/C++
 
-Copy `dist/sqldeep.h` and `dist/sqldeep.cpp` into your project and compile as
-C++20. No external dependencies at runtime.
+Compile `dist/sqldeep.cpp` (C++20) with the five deepparser sources in
+`vendor/deepparser/src/` (`arena.c`, `liteparser.c`, `lp_tokenize.c`,
+`lp_unparse.c`, `parse.c`). Include paths: `-Idist -Ivendor/deepparser/src`.
+Or link `build/libsqldeep.a` from `cv lib`. The transpiler itself has no
+database dependency; deepparser is the only link-time requirement.
 
 For SQLite targets, also include `dist/sqldeep_xml.h` and `dist/sqldeep_xml.c`.
 These provide the full set of custom SQLite functions that transpiled SQL calls:
@@ -377,11 +388,11 @@ without losing type information.
 go get github.com/marcelocantos/sqldeep/go/sqldeep
 ```
 
-The Go module wraps the C transpiler via cgo and includes a pure-Go port of the
-SQLite runtime functions. Importing the package auto-registers the runtime on
-every new SQLite connection (via `sqlite3_auto_extension`), so
-[go-sqlite3](https://github.com/mattn/go-sqlite3) connections work out of the
-box:
+The Go module wraps the C transpiler via cgo and links `dist/sqldeep_xml.c` for
+the SQLite runtime (same C implementation as C++/Kotlin/Swift). Importing the
+package auto-registers the runtime on every new SQLite connection (via
+`sqlite3_auto_extension`), so [go-sqlite3](https://github.com/mattn/go-sqlite3)
+connections work out of the box:
 
 ```go
 import (
@@ -399,10 +410,11 @@ output, err := sqldeep.Transpile(input)
 
 The `swift/` directory contains a Swift Package with two components:
 
-- **SQLDeepRuntime** — pure Swift port of all SQLite runtime functions
-  (JSON, XML, JSONML, JSX). Call `sqldeepRegisterSQLite(db)` once per connection.
+- **Runtime** — thin Swift wrapper that links `dist/sqldeep_xml.c` (via
+  `CSQLDeepXML`) and calls `sqldeep_register_sqlite`. Same C runtime as
+  Go/Kotlin; call `sqldeepRegisterSQLite(db)` once per connection.
 - **Transpiler** — Swift wrapper around the C transpiler API via a `CSQLDeep`
-  clang module.
+  clang module (compiles `dist/sqldeep.cpp` + deepparser in-tree).
 
 ```swift
 import SQLDeepRuntime
@@ -411,15 +423,15 @@ let sql = try sqldeepTranspile("FROM users SELECT { id, name }")
 // Execute sql against SQLite with sqldeepRegisterSQLite(db) registered.
 ```
 
-Requires linking against the pre-built `libsqldeep.a` static library. See
-`swift/Package.swift` for linker flags.
+See `swift/Package.swift` for include/link flags. Works on macOS and iOS
+(system `libsqlite3`).
 
 ### Kotlin/Android
 
 The `kotlin/` directory contains an Android library with JNI bindings:
 
 - **SQLDeep** — transpiler (`SQLDeep.transpile()`, `SQLDeep.transpileFK()`)
-- **SQLDeepRuntime** — pure Kotlin port of all SQLite runtime functions
+- **SQLDeepRuntime** — JNI registration of `dist/sqldeep_xml.c` functions
 - **SQLDeepTestHelper** — JNI bridge for direct SQLite access in tests
 
 ```kotlin
@@ -442,17 +454,23 @@ your project context.
 All language bindings share a common test suite defined in `testdata/sqlite.yaml`
 (79 integration test cases). Each language has a thin driver that loads the YAML,
 transpiles sqldeep syntax, executes the resulting SQL against an in-memory SQLite
-database, and verifies the JSON/XML output. This ensures consistent behaviour
-across all platforms:
+database, and verifies the JSON/XML output. PostgreSQL coverage is transpile-only:
+`tests/test_transpile.cpp` / `testdata/transpile.yaml` compare `expected_postgres`
+strings; no job runs the emitted SQL against PostgreSQL.
 
-| Platform | Driver | Tests |
+CI (ubuntu-latest + macos-latest) gates `cv test`, `go test` in `go/sqldeep`, and
+a Kotlin JNI CMake configure+build (so omitting deepparser fails the merge gate).
+Other drivers remain local/opt-in and are not merge gates:
+
+| Platform | Driver | CI gate? |
 |---|---|---|
-| C++ (doctest) | `tests/test_sqlite.cpp` | 79 cases |
-| Go | `go/sqldeep/smoke_test.go` | 79 cases |
-| Swift (XCTest) | `swift/Tests/.../SQLiteIntegrationTests.swift` | 79 cases |
-| Swift (iOS Simulator) | xcodegen test host | 79 cases |
-| Kotlin (JVM desktop) | `kotlin/desktop_test.kt` | 79 cases |
-| Kotlin (Android) | `kotlin/src/androidTest/...` | 79 cases |
+| C++ (doctest) | `tests/test_sqlite.cpp` (via `cv test`) | yes |
+| Go | `go/sqldeep` (`go test`) | yes |
+| Kotlin JNI | `kotlin/src/main/jni` CMake (compile/link) | yes (build) |
+| Swift (XCTest) | `swift/Tests/.../SQLiteIntegrationTests.swift` | local |
+| Swift (iOS Simulator) | xcodegen test host | local |
+| Kotlin (JVM desktop) | `kotlin/desktop_test.kt` | local |
+| Kotlin (Android) | `kotlin/src/androidTest/...` | local |
 
 ## Related projects
 

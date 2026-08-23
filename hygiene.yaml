@@ -7,15 +7,16 @@
 # per-dimension ratchet (below floor => DRIFT); `aspires` is the gap horizon;
 # `enforce` is intent-only and does not affect tiers.
 #
-# Headline CI is `cv test` on ubuntu-latest + macos-latest. Go / Swift / Kotlin
-# binding suites exist but are local/opt-in and are not the shipped gate.
+# Headline CI is `cv test` plus `go test` (go/sqldeep) and Kotlin JNI CMake on
+# ubuntu-latest + macos-latest. Swift / Kotlin YAML suites remain local/opt-in.
+# ASan/UBSan remains planned (correctness.sanitizers).
 
 schema_version: 1
 
 repo: sqldeep
 aspires: 3
 floors:            # per-dimension held-tier ratchet; below floor => DRIFT
-  correctness: 1   # cv test in CI (ubuntu + macos); bindings/examples not CI
+  correctness: 1   # cv test + go test + Kotlin JNI CMake; Swift/Kotlin YAML local
   security: 2      # GitHub secret scanning + push protection
   quality: 0       # -Wall in cvfile; no format/lint gate
   deps: 1          # vendored sqlite/doctest + deepparser submodule; no dependabot
@@ -89,9 +90,10 @@ items:
     enforce: warning
     tier: 2
     reason: >-
-      Binding tests exist (go/sqldeep, swift/Tests, kotlin) and share
-      testdata/sqlite.yaml, but CI is the C++ `cv test` gate only.
-    evidence: {absent: {file: {path: .github/workflows/ci.yml, matches: 'go test'}}}
+      CI now runs go test (go/sqldeep) and Kotlin JNI CMake configure+build.
+      Full Swift / Kotlin YAML suites (desktop_test, androidTest, SPM/iOS) remain
+      local/opt-in; correctness.sanitizers covers ASan/UBSan separately.
+    evidence: {file: {path: .github/workflows/ci.yml, matches: 'go test'}}
 
   - id: correctness.sanitizers
     dim: correctness
@@ -381,6 +383,18 @@ items:
     reason: gh api branches/master/protection returns 404; no required CI.
     evidence: {absent: {gh_setting: {key: protected, equals: true}}}
 
+  - id: governance.codeowners
+    dim: governance
+    desc: CODEOWNERS routes PR review to named owners
+    state: skipped
+    cadence: once-must-hold
+    enforce: informational
+    tier: 3
+    reason: >-
+      Solo-maintained repo; inventing CODEOWNERS ownership would be fake.
+      Review routing is not used.
+    evidence: {absent: {file: {path: .github/CODEOWNERS}}}
+
   # ================================= BUILD ===============================
   - id: build.cvfile
     dim: build
@@ -520,9 +534,11 @@ items:
   - id: agent.agents-md
     dim: agent
     desc: AGENTS.md present as the multi-tool project instruction file
-    state: planned
+    state: skipped
     cadence: once-must-hold
     enforce: informational
     tier: 3
-    reason: Project instructions live in CLAUDE.md only; no AGENTS.md.
+    reason: >-
+      Project instructions live in CLAUDE.md only; a redundant AGENTS.md
+      is not planned.
     evidence: {absent: {file: {path: AGENTS.md}}}

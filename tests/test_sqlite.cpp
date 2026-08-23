@@ -58,6 +58,20 @@ std::vector<std::string> query(sqlite3* db, const std::string& sql) {
     return rows;
 }
 
+// Like query(), but returns the SQLite error message instead of throwing
+// when prepare/step fails. Used by error_contains cases.
+std::string query_error(sqlite3* db, const std::string& sql) {
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+        return sqlite3_errmsg(db);
+    int rc = sqlite3_step(stmt);
+    std::string msg;
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+        msg = sqlite3_errmsg(db);
+    sqlite3_finalize(stmt);
+    return msg;
+}
+
 std::string transpile_str(const std::string& input) {
     char* err_msg = nullptr;
     int err_line = 0, err_col = 0;
@@ -97,6 +111,7 @@ struct TestCase {
     std::string raw_sql;     // execute directly (no transpile)
     std::vector<std::string> expected;
     std::vector<std::string> expected_contains;
+    std::string error_contains; // expect SQL/runtime error containing this
 
     // FK metadata
     struct FK {
@@ -138,6 +153,8 @@ std::vector<TestCase> load_tests() {
         if (node.contains("expected_contains"))
             for (auto& e : node["expected_contains"])
                 tc.expected_contains.push_back(e.get_value<std::string>());
+        if (node.contains("error_contains"))
+            tc.error_contains = node["error_contains"].get_value<std::string>();
 
         if (node.contains("fks")) {
             for (auto& fk_node : node["fks"]) {
@@ -184,6 +201,15 @@ TEST_CASE("sqlite integration") {
                 exec(g.db, sql);
 
             std::vector<std::string> rows;
+            std::string err_msg;
+
+            auto run_sql = [&](const std::string& sql) {
+                if (!tc.error_contains.empty()) {
+                    err_msg = query_error(g.db, sql);
+                } else {
+                    rows = query(g.db, sql);
+                }
+            };
 
             if (!tc.steps.empty()) {
                 // Multi-step test
@@ -194,12 +220,12 @@ TEST_CASE("sqlite integration") {
                     }
                     if (!step.transpile_query.empty()) {
                         auto sql = transpile_str(step.transpile_query);
-                        rows = query(g.db, sql);
+                        run_sql(sql);
                     }
                 }
             } else if (!tc.raw_sql.empty()) {
                 // Direct SQL (no transpile)
-                rows = query(g.db, tc.raw_sql);
+                run_sql(tc.raw_sql);
             } else if (!tc.fks.empty()) {
                 // FK-guided transpile
                 std::vector<std::vector<sqldeep_column_pair>> col_storage;
@@ -216,15 +242,19 @@ TEST_CASE("sqlite integration") {
                 }
                 auto sql = transpile_fk_str(tc.input, cfks.data(),
                                              static_cast<int>(cfks.size()));
-                rows = query(g.db, sql);
+                run_sql(sql);
             } else {
                 // Normal transpile + query
                 auto sql = transpile_str(tc.input);
-                rows = query(g.db, sql);
+                run_sql(sql);
             }
 
             // Verify
-            if (!tc.expected_contains.empty()) {
+            if (!tc.error_contains.empty()) {
+                CHECK_MESSAGE(err_msg.find(tc.error_contains) != std::string::npos,
+                              "expected error containing '" << tc.error_contains
+                              << "', got '" << err_msg << "'");
+            } else if (!tc.expected_contains.empty()) {
                 REQUIRE(rows.size() == 1);
                 for (const auto& needle : tc.expected_contains)
                     CHECK_MESSAGE(rows[0].find(needle) != std::string::npos,

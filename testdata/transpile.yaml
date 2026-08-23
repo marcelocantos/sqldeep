@@ -689,7 +689,7 @@ convention:
       } FROM categories
         RECURSE ON (parent_id)
         WHERE parent_id IS NULL
-    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected: "WITH RECURSIVE _sdq_dfs AS (SELECT id, name, parent_id, 0 AS _depth, printf('%019d', ROW_NUMBER() OVER (ORDER BY id, rowid)) AS _path FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%019d', (SELECT COUNT(*) FROM categories x WHERE x.parent_id = c.parent_id AND (x.id < c.id OR x.id = c.id AND x.rowid <= c.rowid))) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE typeof(id) != 'integer') THEN json('RECURSE requires integer primary key') ELSE (SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
 
   - name: recursive forest (non-singular)
     input: |-
@@ -699,7 +699,7 @@ convention:
       } FROM categories
         RECURSE ON (parent_id)
         WHERE parent_id IS NULL
-    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT '[' || group_concat(_fragment, '') || ']' FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected: "WITH RECURSIVE _sdq_dfs AS (SELECT id, name, parent_id, 0 AS _depth, printf('%019d', ROW_NUMBER() OVER (ORDER BY id, rowid)) AS _path FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%019d', (SELECT COUNT(*) FROM categories x WHERE x.parent_id = c.parent_id AND (x.id < c.id OR x.id = c.id AND x.rowid <= c.rowid))) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE typeof(id) != 'integer') THEN json('RECURSE requires integer primary key') ELSE (SELECT '[' || group_concat(_fragment, '') || ']' FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
 
   - name: recursive with explicit PK
     input: |-
@@ -709,7 +709,7 @@ convention:
       } FROM nodes
         RECURSE ON (parent_nid = nid)
         WHERE parent_nid IS NULL
-    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_nid, nid, _depth, _path) AS (SELECT id, name, parent_nid, nid, 0, printf('%010d', nid) FROM nodes WHERE parent_nid IS NULL UNION ALL SELECT c.id, c.name, c.parent_nid, c.nid, d._depth + 1, d._path || '/' || printf('%010d', c.nid) FROM nodes c JOIN _sdq_dfs d ON c.parent_nid = d.nid), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_nid ORDER BY nid) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"subs\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected: "WITH RECURSIVE _sdq_dfs AS (SELECT id, name, parent_nid, nid, 0 AS _depth, printf('%019d', ROW_NUMBER() OVER (ORDER BY nid, rowid)) AS _path FROM nodes WHERE parent_nid IS NULL UNION ALL SELECT c.id, c.name, c.parent_nid, c.nid, d._depth + 1, d._path || '/' || printf('%019d', (SELECT COUNT(*) FROM nodes x WHERE x.parent_nid = c.parent_nid AND (x.nid < c.nid OR x.nid = c.nid AND x.rowid <= c.rowid))) FROM nodes c JOIN _sdq_dfs d ON c.parent_nid = d.nid), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_nid ORDER BY nid) AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"subs\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE typeof(nid) != 'integer') THEN json('RECURSE requires integer primary key') ELSE (SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
 
   - name: recursive postgres
     input: |-
@@ -719,8 +719,49 @@ convention:
       } FROM categories
         RECURSE ON (parent_id)
         WHERE parent_id IS NULL
-    expected: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, printf('%010d', id) FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%010d', c.id) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
-    expected_postgres: "WITH RECURSIVE _sdq_dfs(id, name, parent_id, _depth, _path) AS (SELECT id, name, parent_id, 0, lpad(CAST(id AS text), 10, '0') FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || lpad(CAST(c.id AS text), 10, '0') FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, jsonb_build_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events(_sort_key, _fragment) AS (SELECT _path, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' FROM _sdq_ranked UNION ALL SELECT _path || chr(127), ']}' FROM _sdq_ranked) SELECT string_agg(_fragment, '' ORDER BY _sort_key) FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)"
+    expected: "WITH RECURSIVE _sdq_dfs AS (SELECT id, name, parent_id, 0 AS _depth, printf('%019d', ROW_NUMBER() OVER (ORDER BY id, rowid)) AS _path FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%019d', (SELECT COUNT(*) FROM categories x WHERE x.parent_id = c.parent_id AND (x.id < c.id OR x.id = c.id AND x.rowid <= c.rowid))) FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE typeof(id) != 'integer') THEN json('RECURSE requires integer primary key') ELSE (SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
+    expected_postgres: "WITH RECURSIVE _sdq_dfs AS (SELECT id, name, parent_id, 0 AS _depth, lpad(CAST(ROW_NUMBER() OVER (ORDER BY id) AS text), 19, '0') AS _path FROM categories WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || lpad(CAST((SELECT COUNT(*) FROM categories x WHERE x.parent_id = c.parent_id AND (x.id < c.id OR x.id = c.id AND x.ctid <= c.ctid)) AS text), 19, '0') FROM categories c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, jsonb_build_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || chr(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE CAST(pg_typeof(id) AS text) NOT IN ('integer', 'bigint', 'smallint')) THEN CAST('RECURSE requires integer primary key' AS json) ELSE (SELECT string_agg(_fragment, '' ORDER BY _sort_key) FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
+
+  # T7.2 / ENT-002: RECURSE identifiers via sql_quote_ident (no raw splice)
+  - name: recursive quoted table with space
+    input: |-
+      SELECT/1 {
+        id, name,
+        children: *
+      } FROM "order items"
+        RECURSE ON (parent_id)
+        WHERE parent_id IS NULL
+    expected: "WITH RECURSIVE _sdq_dfs AS (SELECT id, name, parent_id, 0 AS _depth, printf('%019d', ROW_NUMBER() OVER (ORDER BY id, rowid)) AS _path FROM \"order items\" WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%019d', (SELECT COUNT(*) FROM \"order items\" x WHERE x.parent_id = c.parent_id AND (x.id < c.id OR x.id = c.id AND x.rowid <= c.rowid))) FROM \"order items\" c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE typeof(id) != 'integer') THEN json('RECURSE requires integer primary key') ELSE (SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
+
+  - name: recursive table with embedded quotes
+    input: |-
+      SELECT/1 {
+        id, name,
+        children: *
+      } FROM "weird""name"
+        RECURSE ON (parent_id)
+        WHERE parent_id IS NULL
+    expected: "WITH RECURSIVE _sdq_dfs AS (SELECT id, name, parent_id, 0 AS _depth, printf('%019d', ROW_NUMBER() OVER (ORDER BY id, rowid)) AS _path FROM \"weird\"\"name\" WHERE parent_id IS NULL UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%019d', (SELECT COUNT(*) FROM \"weird\"\"name\" x WHERE x.parent_id = c.parent_id AND (x.id < c.id OR x.id = c.id AND x.rowid <= c.rowid))) FROM \"weird\"\"name\" c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE typeof(id) != 'integer') THEN json('RECURSE requires integer primary key') ELSE (SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
+
+  - name: recursive crafted table cannot alter CTE
+    input: |-
+      SELECT/1 {
+        id, name,
+        children: *
+      } FROM "t WHERE 1=1) SELECT secret FROM users;--"
+        RECURSE ON (parent_id)
+    expected: "WITH RECURSIVE _sdq_dfs AS (SELECT id, name, parent_id, 0 AS _depth, printf('%019d', ROW_NUMBER() OVER (ORDER BY id, rowid)) AS _path FROM \"t WHERE 1=1) SELECT secret FROM users;--\" UNION ALL SELECT c.id, c.name, c.parent_id, d._depth + 1, d._path || '/' || printf('%019d', (SELECT COUNT(*) FROM \"t WHERE 1=1) SELECT secret FROM users;--\" x WHERE x.parent_id = c.parent_id AND (x.id < c.id OR x.id = c.id AND x.rowid <= c.rowid))) FROM \"t WHERE 1=1) SELECT secret FROM users;--\" c JOIN _sdq_dfs d ON c.parent_id = d.id), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'name', name) AS _obj, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY id) AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE typeof(id) != 'integer') THEN json('RECURSE requires integer primary key') ELSE (SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
+
+  - name: recursive quoted field fk and pk round-trip
+    input: |-
+      SELECT/1 {
+        id, "my name",
+        children: *
+      } FROM t
+        RECURSE ON ("parent id" = "row id")
+        WHERE "parent id" IS NULL
+    expected: "WITH RECURSIVE _sdq_dfs AS (SELECT id, \"my name\", \"parent id\", \"row id\", 0 AS _depth, printf('%019d', ROW_NUMBER() OVER (ORDER BY \"row id\", rowid)) AS _path FROM t WHERE \"parent id\" IS NULL UNION ALL SELECT c.id, c.\"my name\", c.\"parent id\", c.\"row id\", d._depth + 1, d._path || '/' || printf('%019d', (SELECT COUNT(*) FROM t x WHERE x.\"parent id\" = c.\"parent id\" AND (x.\"row id\" < c.\"row id\" OR x.\"row id\" = c.\"row id\" AND x.rowid <= c.rowid))) FROM t c JOIN _sdq_dfs d ON c.\"parent id\" = d.\"row id\"), _sdq_ranked AS (SELECT *, sqldeep_json_object('id', id, 'my name', \"my name\") AS _obj, ROW_NUMBER() OVER (PARTITION BY \"parent id\" ORDER BY \"row id\") AS _child_rank FROM _sdq_dfs), _sdq_events AS (SELECT _path AS _sort_key, CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || substr(_obj, 1, length(_obj) - 1) || ',\"children\":[' AS _fragment FROM _sdq_ranked UNION ALL SELECT _path || char(127), ']}' FROM _sdq_ranked) SELECT CASE WHEN EXISTS (SELECT 1 FROM _sdq_dfs WHERE typeof(\"row id\") != 'integer') THEN json('RECURSE requires integer primary key') ELSE (SELECT group_concat(_fragment, '') FROM (SELECT _fragment FROM _sdq_events ORDER BY _sort_key)) END"
+
 
 # ── XML literals ────────────────────────────────────────────────────
 
@@ -1123,6 +1164,21 @@ errors:
 
   - name: param positional reordered nested in projection
     input: "SELECT { x: ?, items: (FROM t WHERE q = ? SELECT [?]) } FROM t"
+
+  # Bare-expression wrap must not fail open (T7.3 / ENT-003): inputs
+  # that only parse as SELECT <input> when they have extra columns or
+  # clauses must surface the original parse error, not empty/stripped SQL.
+  - name: bare multi-column fails closed
+    input: "a, b"
+
+  - name: bare numeric multi-column fails closed
+    input: "1, 2"
+
+  - name: bare union fails closed
+    input: "1 UNION SELECT 2"
+
+  - name: bare expression with from clause fails closed
+    input: "x FROM t"
 
 # ── FK-guided error cases ────────────────────────────────────────────
 

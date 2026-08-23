@@ -1,16 +1,20 @@
 # sqldeep — Agent Guide
 
 Transpiler: JSON5-like SQL syntax → standard SQL with database-specific JSON
-functions. C header with C++20 implementation. Zero runtime dependencies.
-Supports SQLite (default) and PostgreSQL backends.
+functions. C header with C++20 implementation plus vendored deepparser sources.
+SQLite is the supported runtime backend (default). PostgreSQL is
+transpile-only: `SQLDEEP_POSTGRES` emits `jsonb_*` SQL checked against
+`expected_postgres` strings; there is no PG execution oracle in CI.
 
 ## Integration
 
 ### C/C++
 
-Copy the `dist/` files (`sqldeep.h` and `sqldeep.cpp`) into your project and
-compile as C++20. No link-time dependencies — the database is only needed at
-runtime by the *caller*, not by sqldeep itself.
+Compile `dist/sqldeep.cpp` (C++20) together with the five deepparser C sources
+under `vendor/deepparser/src/` (`arena.c`, `liteparser.c`, `lp_tokenize.c`,
+`lp_unparse.c`, `parse.c`), with `-Idist -Ivendor/deepparser/src`. Or link
+`build/libsqldeep.a` from `cv lib`, which bundles the same objects. The
+database is only needed at runtime by the *caller*, not by the transpiler.
 
 For SQLite targets, also include `sqldeep_xml.h` and `sqldeep_xml.c`. These
 register all custom SQLite functions that transpiled SQL calls — both XML
@@ -55,7 +59,8 @@ sql, err = sqldeep.TranspileFK(input, []sqldeep.ForeignKey{...})
 
 The `swift/` directory contains a Swift Package (`SQLDeepRuntime`):
 
-- Pure Swift port of all SQLite runtime functions (JSON, XML, JSONML, JSX)
+- Thin Swift wrapper linking `dist/sqldeep_xml.c` (via `CSQLDeepXML`) for the
+  SQLite runtime — same C implementation as Go and Kotlin
 - Swift wrapper around the C transpiler API via a `CSQLDeep` clang module
 
 ```swift
@@ -66,8 +71,8 @@ let sql = try sqldeepTranspile("FROM users SELECT { id, name }")
 sqldeepRegisterSQLite(db)  // db is OpaquePointer (sqlite3*)
 ```
 
-Requires linking `libsqldeep.a`. See `swift/Package.swift` for flags.
-Also works on iOS — build the static library with `xcrun -sdk iphoneos`.
+See `swift/Package.swift` for include/link flags. Also works on iOS
+(system `libsqlite3`).
 
 ### Kotlin/Android
 
@@ -81,16 +86,18 @@ val sql = SQLDeep.transpile("FROM users SELECT { id, name }")
 val sql = SQLDeep.transpileFK(input, listOf(ForeignKey(...)))
 ```
 
-Pure Kotlin port of all SQLite runtime functions. Native code built via CMake
-(C++20) through Android's `externalNativeBuild`. Also runs on JVM desktop —
-see `kotlin/desktop_test.kt`.
+JNI registration of `dist/sqldeep_xml.c` runtime functions. Native code built
+via CMake (C++20) through Android's `externalNativeBuild`. Also runs on JVM
+desktop — see `kotlin/desktop_test.kt`.
 
 ### Shared test suite
 
 All bindings share `testdata/sqlite.yaml` (79 integration test cases). Each
 language has a ~100-line driver that loads the YAML, transpiles, executes
-against in-memory SQLite, and verifies output. Add new test cases to the YAML
-file and all languages pick them up automatically.
+against in-memory SQLite, and verifies output. CI gates C++ (`cv test`) and Go
+(`go test` in `go/sqldeep`); Kotlin JNI CMake is also gated for compile/link.
+Swift and Kotlin YAML drivers are local/opt-in — add cases to the YAML and run
+those drivers locally to exercise them.
 
 ## API
 
@@ -112,7 +119,7 @@ sqldeep_foreign_key fks[] = {{"orders", "customers", cols, 1}};
 char* sql2 = sqldeep_transpile_fk(input, fks, 1,
                                     &err_msg, &err_line, &err_col);
 
-// PostgreSQL backend:
+// PostgreSQL output (transpile-only — not executed in CI):
 char* sql3 = sqldeep_transpile_backend(input, SQLDEEP_POSTGRES,
                                         &err_msg, &err_line, &err_col);
 ```

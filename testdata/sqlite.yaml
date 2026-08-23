@@ -622,6 +622,46 @@
   expected:
     - "NULL"
 
+- name: "recursive negative integer PKs"
+  setup:
+    - "CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER)"
+    - "INSERT INTO categories VALUES(-2, 'Root', NULL)"
+    - "INSERT INTO categories VALUES(-1, 'A', -2)"
+    - "INSERT INTO categories VALUES(-3, 'B', -2)"
+  input: |
+    SELECT/1 { id, name, children: * }
+    FROM categories
+    RECURSE ON (parent_id)
+    WHERE parent_id IS NULL
+  expected:
+    - '{"id":-2,"name":"Root","children":[{"id":-3,"name":"B","children":[]},{"id":-1,"name":"A","children":[]}]}'
+
+- name: "recursive wide integer PKs"
+  setup:
+    - "CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER)"
+    - "INSERT INTO categories VALUES(1, 'Root', NULL)"
+    - "INSERT INTO categories VALUES(10000000001, 'Big', 1)"
+    - "INSERT INTO categories VALUES(2000000000, 'Med', 1)"
+  input: |
+    SELECT/1 { id, name, children: * }
+    FROM categories
+    RECURSE ON (parent_id)
+    WHERE parent_id IS NULL
+  expected:
+    - '{"id":1,"name":"Root","children":[{"id":2000000000,"name":"Med","children":[]},{"id":10000000001,"name":"Big","children":[]}]}'
+
+- name: "recursive non-integer PK is rejected"
+  setup:
+    - "CREATE TABLE categories(id TEXT PRIMARY KEY, name TEXT, parent_id TEXT)"
+    - "INSERT INTO categories VALUES('root', 'Root', NULL)"
+    - "INSERT INTO categories VALUES('a', 'A', 'root')"
+  input: |
+    SELECT/1 { id, name, children: * }
+    FROM categories
+    RECURSE ON (parent_id)
+    WHERE parent_id IS NULL
+  error_contains: "malformed JSON"
+
 # ── FK-guided joins ─────────────────────────────────────────────────
 
 - name: "fk-guided join"
@@ -916,3 +956,48 @@
     - transpile_query: 'SELECT jsx(<div class="outer">{(SELECT col FROM v_inner)}</div>)'
   expected:
     - '["div",{"class":"outer"},["span",{"class":"green"},"hello"]]'
+
+# ── NULL tag/name/key safety (T7.1 / ENT-001) ───────────────────────
+# SQL NULL in tag, attribute-name, or object-key slots must raise a
+# defined SQL error — never SIGSEGV the host process.
+
+- name: "null xml tag is sql error not crash"
+  setup: []
+  raw_sql: "SELECT CAST(xml_element(NULL) AS TEXT)"
+  error_contains: "NULL tag"
+
+- name: "null xml_attrs name is sql error not crash"
+  setup: []
+  raw_sql: "SELECT CAST(xml_attrs(NULL, 'v') AS TEXT)"
+  error_contains: "NULL attribute name"
+
+- name: "null json object key is sql error not crash"
+  setup: []
+  raw_sql: "SELECT CAST(sqldeep_json_object(NULL, 1) AS TEXT)"
+  error_contains: "NULL object key"
+
+- name: "null computed object key from column is sql error not crash"
+  setup:
+    - "CREATE TABLE t(k TEXT, v INT)"
+    - "INSERT INTO t VALUES(NULL, 1)"
+  input: "SELECT {(k): v} FROM t"
+  error_contains: "NULL object key"
+
+- name: "null jsonml tag is sql error not crash"
+  setup: []
+  raw_sql: "SELECT CAST(xml_element_jsonml(NULL) AS TEXT)"
+  error_contains: "NULL tag"
+
+# ── xml_attrs length/escape (T7.5 / ENT-005) ────────────────────────
+
+- name: "xml attrs quote escaping"
+  setup: []
+  raw_sql: "SELECT CAST(xml_attrs('a', '\"\"\"') AS TEXT)"
+  expected:
+    - ' a="&quot;&quot;&quot;"'
+
+- name: "xml attrs special chars in value"
+  setup: []
+  raw_sql: "SELECT CAST(xml_element('t', xml_attrs('a', '\"<>&')) AS TEXT)"
+  expected:
+    - '<t a="&quot;&lt;&gt;&amp;"></t>'
