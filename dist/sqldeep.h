@@ -38,6 +38,8 @@ typedef enum {
 
 // Convention-based transpile (SQLite backend). Returns malloc'd string (caller
 // frees with sqldeep_free). On error returns NULL, sets err_msg/err_line/err_col.
+// A NULL input, or a NULL fks array with fk_count > 0, is an error (line and
+// column 0), never undefined behaviour. No C++ exception escapes these calls.
 char* sqldeep_transpile(const char* input,
                         char** err_msg, int* err_line, int* err_col);
 

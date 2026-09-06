@@ -1723,6 +1723,54 @@ void clear_error(char** err_msg, int* err_line, int* err_col) {
     if (err_col)  *err_col = 0;
 }
 
+// Argument checks shared by every extern "C" entry. FFI callers (cgo,
+// JNI, Swift) can hand us NULL on their own allocation failures; the
+// header promises NULL + err_msg, never undefined behaviour.
+bool check_args(const char* input, const sqldeep_foreign_key* fks,
+                int fk_count, char** err_msg, int* err_line, int* err_col) {
+    if (!input) {
+        set_error(err_msg, err_line, err_col,
+                  sqldeep::Error("input is NULL", 0, 0));
+        return false;
+    }
+    if (fk_count > 0 && !fks) {
+        set_error(err_msg, err_line, err_col,
+                  sqldeep::Error("foreign key array is NULL", 0, 0));
+        return false;
+    }
+    for (int i = 0; i < fk_count; ++i) {
+        if (!fks[i].from_table || !fks[i].to_table
+            || (fks[i].column_count > 0 && !fks[i].columns)) {
+            set_error(err_msg, err_line, err_col,
+                      sqldeep::Error("foreign key " + std::to_string(i)
+                                     + " has a NULL field", 0, 0));
+            return false;
+        }
+    }
+    return true;
+}
+
+// Every transpile entry funnels through here so the exception-to-error
+// translation lives in one place. Anything other than sqldeep::Error
+// (std::bad_alloc, std::length_error, ...) becomes a generic error with
+// no position rather than escaping into C, cgo, JNI or Swift frames.
+template <typename Fn>
+char* guarded(Fn&& fn, char** err_msg, int* err_line, int* err_col) {
+    try {
+        return dup_str(fn());
+    } catch (const sqldeep::Error& e) {
+        set_error(err_msg, err_line, err_col, e);
+    } catch (const std::exception& e) {
+        set_error(err_msg, err_line, err_col,
+                  sqldeep::Error(std::string("internal error: ") + e.what(),
+                                 0, 0));
+    } catch (...) {
+        set_error(err_msg, err_line, err_col,
+                  sqldeep::Error("internal error", 0, 0));
+    }
+    return nullptr;
+}
+
 sqldeep::Backend to_backend(sqldeep_backend b) {
     switch (b) {
         case SQLDEEP_POSTGRES:       return sqldeep::Backend::postgres;
@@ -1772,12 +1820,11 @@ char* sqldeep_transpile_backend(const char* input,
                                 sqldeep_backend backend,
                                 char** err_msg, int* err_line, int* err_col) {
     clear_error(err_msg, err_line, err_col);
-    try {
-        return dup_str(sqldeep::transpile(input, to_backend(backend)));
-    } catch (const sqldeep::Error& e) {
-        set_error(err_msg, err_line, err_col, e);
+    if (!check_args(input, nullptr, 0, err_msg, err_line, err_col))
         return nullptr;
-    }
+    return guarded([&] {
+        return sqldeep::transpile(input, to_backend(backend));
+    }, err_msg, err_line, err_col);
 }
 
 char* sqldeep_transpile_fk_backend(const char* input,
@@ -1785,13 +1832,12 @@ char* sqldeep_transpile_fk_backend(const char* input,
                                    const sqldeep_foreign_key* fks, int fk_count,
                                    char** err_msg, int* err_line, int* err_col) {
     clear_error(err_msg, err_line, err_col);
-    try {
-        auto cpp_fks = to_cpp_fks(fks, fk_count);
-        return dup_str(sqldeep::transpile(input, cpp_fks, to_backend(backend)));
-    } catch (const sqldeep::Error& e) {
-        set_error(err_msg, err_line, err_col, e);
+    if (!check_args(input, fks, fk_count, err_msg, err_line, err_col))
         return nullptr;
-    }
+    return guarded([&] {
+        auto cpp_fks = to_cpp_fks(fks, fk_count);
+        return sqldeep::transpile(input, cpp_fks, to_backend(backend));
+    }, err_msg, err_line, err_col);
 }
 
 const char* sqldeep_version(void) {
