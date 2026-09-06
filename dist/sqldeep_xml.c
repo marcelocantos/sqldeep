@@ -56,6 +56,22 @@ static int xml_escaped_len(const char *s) {
     return n;
 }
 
+/* Attribute values additionally escape '"' as &quot; (6 bytes).  Must
+   agree byte-for-byte with the fill loop in sd_xml_attrs. */
+static int xml_attr_escaped_len(const char *s) {
+    int n = 0;
+    for (; *s; ++s) {
+        switch (*s) {
+        case '"': n += 6; break;
+        case '<': n += 4; break;
+        case '>': n += 4; break;
+        case '&': n += 5; break;
+        default:  n++; break;
+        }
+    }
+    return n;
+}
+
 static void xml_escape_text_to(const char *s, char *out, int *pos) {
     for (; *s; ++s) {
         switch (*s) {
@@ -93,7 +109,7 @@ static void sd_xml_attrs(sqlite3_context *ctx, int argc,
         len += 1; /* space */
         len += (int)strlen(name);
         val = (const char *)sqlite3_value_text(argv[i + 1]);
-        len += 2 + xml_escaped_len(val); /* ="..." */
+        len += 3 + xml_attr_escaped_len(val); /* = " ... " */
     }
     char *out = (char *)sqlite3_malloc(len + 1);
     if (!out) { sqlite3_result_error_nomem(ctx); return; }

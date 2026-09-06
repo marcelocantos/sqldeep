@@ -978,3 +978,28 @@
   raw_sql: "SELECT CAST(xml_element('a', xml_attrs('href', NULL), NULL) AS TEXT)"
   expected:
     - '<a></a>'
+
+# ── Attribute escaping must reserve exactly what it writes (ENT-005) ─
+
+- name: "xml attribute value with double quotes"
+  raw_sql: "SELECT CAST(xml_element('a', xml_attrs('title', 'say \"hi\"')) AS TEXT)"
+  expected:
+    - '<a title="say &quot;hi&quot;"></a>'
+
+- name: "xml attribute value of only double quotes"
+  raw_sql: "SELECT CAST(xml_attrs('a', '\"\"\"') AS TEXT)"
+  expected:
+    - ' a="&quot;&quot;&quot;"'
+
+- name: "xml attribute value with every escapable char"
+  raw_sql: "SELECT CAST(xml_element('p', xml_attrs('d', '<a href=\"x\">&</a>', 'e', '\"')) AS TEXT)"
+  expected:
+    - '<p d="&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;" e="&quot;"></p>'
+
+- name: "xml attribute via DSL interpolation with quotes"
+  setup:
+    - "CREATE TABLE t(v TEXT)"
+    - "INSERT INTO t VALUES('\"q\"')"
+  input: "SELECT <span title={v}>x</span> FROM t"
+  expected:
+    - '<span title="&quot;q&quot;">x</span>'
