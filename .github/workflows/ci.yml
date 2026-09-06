@@ -28,3 +28,29 @@ jobs:
 
       - name: Build and run tests
         run: cv test
+
+      # The C XML/JSON runtime sizes its own output buffers, so a
+      # length-pass mistake is an out-of-bounds write the plain run
+      # cannot see (ENT-001, ENT-005). ENT-008: keep the sanitizer an
+      # enforced loop, not a one-off local build.
+      - name: Run tests under AddressSanitizer and UBSan
+        run: cv asan
+
+      # ENT-008: the yaml corpus is the shared oracle for every binding,
+      # so the bindings must read the same file rather than a copy that
+      # silently drifts.
+      - name: Check shared test data is not forked
+        run: |
+          cmp testdata/sqlite.yaml swift/Tests/SQLDeepRuntimeTests/sqlite.yaml
+          cmp testdata/sqlite.yaml kotlin/src/androidTest/assets/sqlite.yaml
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      # ENT-008: the Go binding links a static library that CI never
+      # built, so a cgo or packaging break was mergeable.
+      - name: Build the static library and run the Go binding tests
+        run: |
+          cv lib
+          cd go/sqldeep && GOWORK=off go test ./...

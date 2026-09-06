@@ -10,6 +10,12 @@ dp_srcdir   = $dp_dir/src
 dp_incflags = -I$dp_srcdir
 dp_cflags   = -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -O2 -DNDEBUG
 
+# ASan/UBSan variant. The C XML/JSON runtime writes into buffers it sizes
+# itself, so a length-pass mistake there is an out-of-bounds write the
+# plain test run cannot see (ENT-001, ENT-005). Objects are built into
+# build/asan/ so the sanitized and unsanitized trees can coexist.
+san_flags   = -fsanitize=address,undefined -fno-omit-frame-pointer -g
+
 # Platform-dependent readline paths
 lazy os = $[shell uname -s]
 lazy rl_incflags = $[shell if [ "$os" = Darwin ]; then echo "-I/opt/homebrew/opt/readline/include"; fi]
@@ -28,9 +34,13 @@ dp_objs = build/deepparser/arena.o \
 # ── Sources ──────────────────────────────────────────────────────────
 test_srcs = tests/doctest_main.cpp $[wildcard tests/test_*.cpp]
 test_objs = $[patsubst %.cpp,build/%.o,$test_srcs]
+asan_test_objs = $[patsubst %.cpp,build/asan/%.o,$test_srcs]
 
 # ── Tasks ────────────────────────────────────────────────────────────
 !test: build/sqldeep_tests
+    ./$input
+
+!asan: build/asan/sqldeep_tests
     ./$input
 
 !lib: $lib
@@ -65,6 +75,15 @@ $lib: build/sqldeep.o $dp_objs
 $lib_deepparser: $dp_objs
     ar rcs $target $inputs
 
+build/asan/sqldeep_tests: $asan_test_objs build/asan/sqldeep.o build/asan/sqldeep_xml.o \
+                          build/asan/sqlite3.o build/asan/libdeepparser.a
+    $cxx $cxxflags $san_flags -o $target $inputs
+
+build/asan/libdeepparser.a: build/asan/dp/arena.o build/asan/dp/liteparser.o \
+                            build/asan/dp/lp_tokenize.o build/asan/dp/lp_unparse.o \
+                            build/asan/dp/parse.o
+    ar rcs $target $inputs
+
 # ── Compilation rules ────────────────────────────────────────────────
 build/sqldeep.o: dist/sqldeep.cpp dist/sqldeep.h
     $cxx $cxxflags $incflags $dp_incflags -c $input -o $target
@@ -86,3 +105,18 @@ build/examples/{name}.o: examples/{name}.cpp
 
 build/cmd/{name}.o: cmd/{name}.c
     $cc -w $incflags -I$vendor/src -DHAVE_READLINE=1 $rl_incflags -c $input -o $target
+
+build/asan/sqldeep.o: dist/sqldeep.cpp dist/sqldeep.h
+    $cxx $cxxflags $san_flags $incflags $dp_incflags -c $input -o $target
+
+build/asan/sqldeep_xml.o: dist/sqldeep_xml.c dist/sqldeep_xml.h
+    $cc -w $san_flags $incflags -c $input -o $target
+
+build/asan/sqlite3.o: $vendor/src/sqlite3.c
+    $cc -w $san_flags -c $input -o $target
+
+build/asan/dp/{name}.o: $dp_srcdir/{name}.c
+    $cc $dp_cflags $san_flags $dp_incflags -c $input -o $target
+
+build/asan/tests/{name}.o: tests/{name}.cpp
+    $cxx $cxxflags $san_flags $incflags -c $input -o $target
