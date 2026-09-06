@@ -1086,7 +1086,7 @@ private:
 
         std::string children_field;
         std::vector<std::string> field_keys;   // column-name used in CTE
-        std::vector<std::string> obj_pairs;    // "'key', expr" for json_object
+        std::vector<std::string> obj_pairs;    // JSON key per projected field
         for (int i = 0; i < proj->u.sqldeep_object.fields.count; i++) {
             LpNode *f = proj->u.sqldeep_object.fields.items[i];
             if (!f) continue;
@@ -1100,7 +1100,7 @@ private:
             // in the DFS CTE column list".
             std::string col = sf.key_text ? sf.key_text : "";
             field_keys.push_back(col);
-            obj_pairs.push_back("'" + sql_escape_lit(col) + "', " + col);
+            obj_pairs.push_back(col);
         }
         if (children_field.empty()) {
             throw Error("RECURSE requires a `children: *` field in the "
@@ -1119,77 +1119,113 @@ private:
         bool singular = !!sel.sqldeep_singular;
         bool is_pg = (backend_ == Backend::postgres);
 
-        // Build column list. The CTE always includes fk_col; pk_col
-        // is added separately when it differs from fk_col and isn't
-        // already in the field list.
-        std::string col_list;
-        std::string col_select;  // "c.col1, c.col2, ..." for recursive step
+        // The DFS CTE names its own columns, and deepparser cannot
+        // round-trip a quoted identifier in a CTE column list
+        // (lp_make_id_node keeps the token verbatim). So the CTE uses
+        // generated internal names and binds them positionally to the
+        // real, quoted columns of the anchor SELECT. No user identifier
+        // reaches a structural position in the template (ENT-002).
+        std::vector<std::string> dfs_cols;      // internal CTE column names
+        std::string col_list;                   // internal names, comma-joined
+        std::string anchor_select;              // real columns, quoted
+        std::string step_select;                // "c".<real column>, quoted
         for (size_t i = 0; i < field_keys.size(); i++) {
-            if (i > 0) { col_list += ", "; col_select += ", "; }
-            col_list += field_keys[i];
-            col_select += "c." + field_keys[i];
+            dfs_cols.push_back("_c" + std::to_string(i));
+            if (i > 0) {
+                col_list += ", "; anchor_select += ", "; step_select += ", ";
+            }
+            col_list      += dfs_cols[i];
+            anchor_select += sql_ident(field_keys[i]);
+            step_select   += "c." + sql_ident(field_keys[i]);
         }
-        if (!field_keys.empty()) { col_list += ", "; col_select += ", "; }
-        col_list += fk_col;
-        col_select += "c." + fk_col;
-        bool pk_in_fields = false;
-        for (const auto& f : field_keys)
-            if (f == pk_col) { pk_in_fields = true; break; }
-        if (pk_col != fk_col && !pk_in_fields) {
-            col_list += ", " + pk_col;
-            col_select += ", c." + pk_col;
+        if (!field_keys.empty()) {
+            col_list += ", "; anchor_select += ", "; step_select += ", ";
+        }
+        const std::string fk_ref = "_fk";
+        col_list      += fk_ref;
+        anchor_select += sql_ident(fk_col);
+        step_select   += "c." + sql_ident(fk_col);
+
+        // Where the DFS CTE exposes the PK: an existing projected field
+        // if the PK is one, the FK column when they are the same, and
+        // otherwise a column appended for the purpose.
+        std::string pk_ref;
+        for (size_t i = 0; i < field_keys.size(); i++)
+            if (field_keys[i] == pk_col) { pk_ref = dfs_cols[i]; break; }
+        if (pk_ref.empty() && pk_col == fk_col) pk_ref = fk_ref;
+        if (pk_ref.empty()) {
+            pk_ref = "_pk";
+            col_list      += ", " + pk_ref;
+            anchor_select += ", " + sql_ident(pk_col);
+            step_select   += ", c." + sql_ident(pk_col);
         }
 
-        std::string pad   = is_pg
-            ? "lpad(CAST(" + pk_col + " AS text), 10, '0')"
-            : "printf('%010d', " + pk_col + ")";
-        std::string c_pad = is_pg
-            ? "lpad(CAST(c." + pk_col + " AS text), 10, '0')"
-            : "printf('%010d', c." + pk_col + ")";
+        // The DFS path must order siblings the way the JSON nesting
+        // needs them. printf('%010d', pk) sorts lexicographically, which
+        // disagrees with numeric order for negative PKs and for values
+        // wider than the pad, so the fragments interleave and the output
+        // stops being JSON (ENT-004). Encoding the sign as a leading
+        // '-'/'0' and offsetting negatives by INT64_MIN makes the padded
+        // text sort in the same order as the integer.
+        auto path_key = [&](const std::string& ref) {
+            if (is_pg) {
+                return "CASE WHEN " + ref + " < 0 THEN '-' || lpad(CAST("
+                       + std::to_string(INT64_MAX) + " + " + ref
+                       + " + 1 AS text), 19, '0') ELSE '0' || lpad(CAST("
+                       + ref + " AS text), 19, '0') END";
+            }
+            return "CASE WHEN " + ref + " < 0 THEN '-' || printf('%019d', "
+                   + std::to_string(INT64_MAX) + " + " + ref
+                   + " + 1) ELSE '0' || printf('%019d', " + ref + ") END";
+        };
+        std::string pad   = path_key(sql_ident(pk_col));
+        std::string c_pad = path_key("c." + sql_ident(pk_col));
         std::string concat_fn = is_pg
             ? "string_agg(_fragment, '' ORDER BY _sort_key)"
             : "group_concat(_fragment, '')";
         std::string high_char = is_pg ? "chr(127)" : "char(127)";
 
-        // Build the obj_args for fn_object call.
+        // Build the obj_args for fn_object call. The values are the DFS
+        // CTE's internal columns; the keys stay the user's field names.
         std::string obj_args;
         for (size_t i = 0; i < obj_pairs.size(); i++) {
             if (i > 0) obj_args += ", ";
-            obj_args += obj_pairs[i];
+            obj_args += "'" + sql_escape_lit(obj_pairs[i]) + "', " + dfs_cols[i];
         }
 
         std::string out;
         out += "WITH RECURSIVE _sdq_dfs(";
         out += col_list;
         out += ", _depth, _path) AS (SELECT ";
-        out += col_list;
+        out += anchor_select;
         out += ", 0, ";
         out += pad;
         out += " FROM ";
-        out += table;
+        out += sql_ident(table);
         if (!root_where.empty()) {
             out += " WHERE ";
             out += root_where;
         }
         out += " UNION ALL SELECT ";
-        out += col_select;
+        out += step_select;
         out += ", d._depth + 1, d._path || '/' || ";
         out += c_pad;
         out += " FROM ";
-        out += table;
+        out += sql_ident(table);
         out += " c JOIN _sdq_dfs d ON c.";
-        out += fk_col;
+        out += sql_ident(fk_col);
         out += " = d.";
-        out += pk_col;
+        out += pk_ref;
         out += "), _sdq_ranked AS (SELECT *, ";
         out += fn_object();
         out += "(";
         out += obj_args;
+        // The comma between siblings is decided by _child_rank, so it
+        // must be ranked by the very key the fragments are emitted in
+        // (_path), not by the raw PK (ENT-004).
         out += ") AS _obj, ROW_NUMBER() OVER (PARTITION BY ";
-        out += fk_col;
-        out += " ORDER BY ";
-        out += pk_col;
-        out += ") AS _child_rank FROM _sdq_dfs), ";
+        out += fk_ref;
+        out += " ORDER BY _path) AS _child_rank FROM _sdq_dfs), ";
         out += "_sdq_events(_sort_key, _fragment) AS (SELECT _path, ";
         out += "CASE WHEN _child_rank > 1 THEN ',' ELSE '' END || ";
         out += "substr(_obj, 1, length(_obj) - 1) || ',\"";
@@ -1212,6 +1248,24 @@ private:
             throw Error(msg, 0, 0);
         }
         return new_ast;
+    }
+
+    // Helper: quote an identifier for the text template that
+    // rewrite_recursive_select re-parses. Deepparser has already
+    // dequoted every identifier by the time we see it, so splicing the
+    // raw name lets a name like `t WHERE 1=1) SELECT secret FROM users;--`
+    // rewrite the CTE (ENT-002). Quoting unconditionally is deliberate:
+    // it needs no copy of deepparser's keyword list, and the quotes are
+    // invisible in the final output because deepparser dequotes on the
+    // re-parse and its canonical unparser re-applies its own rule.
+    static std::string sql_ident(const std::string& s) {
+        std::string out = "\"";
+        for (char c : s) {
+            if (c == '"') out += "\"\"";
+            else out += c;
+        }
+        out += "\"";
+        return out;
     }
 
     // Helper: escape single quotes in a string for a SQL string literal.

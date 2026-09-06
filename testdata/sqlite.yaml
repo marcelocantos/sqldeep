@@ -613,6 +613,54 @@
   expected:
     - '[{"id":1,"name":"Root1","children":[{"id":3,"name":"Child1","children":[]}]},{"id":2,"name":"Root2","children":[]}]'
 
+- name: "recursive tree with negative ids"
+  # ENT-004: the DFS path key used to be printf('%010d', pk), which sorts
+  # lexicographically. Negative ids put the comma fragment in the wrong
+  # place and the result stopped being JSON.
+  setup:
+    - "CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER)"
+    - "INSERT INTO categories VALUES(-2, 'root', NULL)"
+    - "INSERT INTO categories VALUES(-1, 'a', -2)"
+    - "INSERT INTO categories VALUES(-3, 'b', -2)"
+  input: |
+    SELECT/1 { id, name, children: * }
+    FROM categories
+    RECURSE ON (parent_id)
+    WHERE parent_id IS NULL
+  expected:
+    - '{"id":-2,"name":"root","children":[{"id":-3,"name":"b","children":[]},{"id":-1,"name":"a","children":[]}]}'
+
+- name: "recursive tree with wide integer ids"
+  # ENT-004: ids wider than the old 10-digit pad collided in the sort key.
+  setup:
+    - "CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER)"
+    - "INSERT INTO categories VALUES(1, 'root', NULL)"
+    - "INSERT INTO categories VALUES(2, 'small', 1)"
+    - "INSERT INTO categories VALUES(99999999999, 'wide', 1)"
+    - "INSERT INTO categories VALUES(9223372036854775807, 'max', 1)"
+  input: |
+    SELECT/1 { id, name, children: * }
+    FROM categories
+    RECURSE ON (parent_id)
+    WHERE parent_id IS NULL
+  expected:
+    - '{"id":1,"name":"root","children":[{"id":2,"name":"small","children":[]},{"id":99999999999,"name":"wide","children":[]},{"id":9223372036854775807,"name":"max","children":[]}]}'
+
+- name: "recursive tree with quoted identifiers"
+  # ENT-002: table, FK and field names used to be concatenated into a
+  # re-parsed SQL template with the quoting already stripped.
+  setup:
+    - 'CREATE TABLE "order items"("item id" INTEGER PRIMARY KEY, name TEXT, "parent item" INTEGER)'
+    - 'INSERT INTO "order items" VALUES(1, ''root'', NULL)'
+    - 'INSERT INTO "order items" VALUES(2, ''child'', 1)'
+  input: |
+    SELECT/1 { "item id", name, children: * }
+    FROM "order items"
+    RECURSE ON ("parent item" = "item id")
+    WHERE "parent item" IS NULL
+  expected:
+    - '{"item id":1,"name":"root","children":[{"item id":2,"name":"child","children":[]}]}'
+
 - name: "recursive empty tree"
   setup:
     - "CREATE TABLE categories(id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER)"
