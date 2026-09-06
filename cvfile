@@ -86,3 +86,36 @@ build/examples/{name}.o: examples/{name}.cpp
 
 build/cmd/{name}.o: cmd/{name}.c
     $cc -w $incflags -I$vendor/src -DHAVE_READLINE=1 $rl_incflags -c $input -o $target
+
+# ── Differential oracle (transpiler parity, oracle/) ─────────────────
+# Reference = frozen v0.21.0 hand-written transpiler (oracle/ref), port =
+# dist/sqldeep.cpp. Driven by `dh` from ~/think/differential-harness.
+lazy dh = $[shell command -v dh 2>/dev/null || echo ~/think/differential-harness/bin/dh]
+oracle_bins = build/oracle/ref build/oracle/port build/oracle/tapegen
+
+# The contract manifest gates; the wide tape is advisory (it is red on the
+# open CREATE-TABLE-AS finding — see oracle/README.md) and must not be
+# silently dropped to keep the gate green.
+!oracle: $oracle_bins
+    cd oracle && "$dh" check harness-contract.yaml && "$dh" selftest harness-contract.yaml && { "$dh" check -q harness.yaml || echo "oracle: wide tape still red (see oracle/README.md)"; }
+
+!oracle-study: $oracle_bins
+    cd oracle && "$dh" study $SEED $MANIFEST
+
+build/oracle/ref: build/oracle/adapter_ref.o build/oracle/sqldeep_ref.o build/sqlite3.o
+    $cxx $cxxflags -o $target $inputs
+
+build/oracle/port: build/oracle/adapter_port.o build/sqldeep.o $lib_deepparser build/sqlite3.o
+    $cxx $cxxflags -o $target $inputs
+
+build/oracle/tapegen: oracle/tapegen.cpp
+    $cxx $cxxflags -o $target $input
+
+build/oracle/adapter_ref.o: oracle/adapter.cpp oracle/ref/sqldeep.h
+    $cxx $cxxflags -Ioracle/ref -I$vendor/include -c $input -o $target
+
+build/oracle/adapter_port.o: oracle/adapter.cpp dist/sqldeep.h
+    $cxx $cxxflags $incflags -c $input -o $target
+
+build/oracle/sqldeep_ref.o: oracle/ref/sqldeep.cpp oracle/ref/sqldeep.h
+    $cxx $cxxflags -w -Ioracle/ref -c $input -o $target

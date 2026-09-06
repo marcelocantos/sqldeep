@@ -1,0 +1,71 @@
+# sqldeep transpiler-parity instance of the differential harness
+# (~/think/differential-harness). Reference: the frozen v0.21.0 hand-written
+# transpiler (ref/sqldeep.cpp). Port: the current deepparser AST pipeline
+# (dist/sqldeep.cpp). One adapter source, compiled against each; a seeded
+# script generator drives both through the same in-memory SQLite session.
+# Build + run: `cv oracle` (see cvfile).
+#
+# THIS FILE is the in-contract subset: the tape omits `CREATE TABLE … AS
+# <sqldeep>`, which has no golden in testdata/ and which the current pipeline
+# does not transpile at all. harness.yaml runs the full tape and is RED on
+# exactly that construct; see oracle/README.md. Keeping both is deliberate —
+# narrowing the tape until the number went green would be the Goodhart move
+# this harness exists to prevent, so the narrowed tape lives beside the wide
+# one rather than replacing it.
+name: sqldeep-transpiler-parity-contract
+
+reference:
+  run: [../build/oracle/ref]
+  wire: tsv
+  sources: [ref/sqldeep.cpp]      # a ratchet tightening must cite the reference
+port:
+  run: [../build/oracle/port]
+  wire: tsv
+
+tape:
+  run: [../build/oracle/tapegen, --no-ctas]
+  wire: tsv
+
+fields:
+  - {name: status, metric: exact}
+  - {name: rows,   metric: exact}
+  - {name: nrows,  metric: abs}
+  - {name: sql,    metric: exact}   # informational: unparsers differ by design
+primary: rows
+horizons: [1, 3, 10, 30, 60, 90]
+seeds: 200
+ticks: 90
+
+# A transpiler over a deterministic database has no sensitive dependence:
+# lyapunov_horizon = the longest horizon is a deliberate claim that pairwise
+# exactness must hold at every tick, however far the script has run.
+acceptance:
+  lyapunov_horizon: 90
+  per_step:
+    - {field: rows,   horizon: 1,  percentile: 100, max: 0}
+    - {field: rows,   horizon: 3,  percentile: 100, max: 0}
+    - {field: rows,   horizon: 10, percentile: 100, max: 0}
+    - {field: rows,   horizon: 30, percentile: 100, max: 0}
+    - {field: rows,   horizon: 60, percentile: 100, max: 0}
+    - {field: rows,   horizon: 90, percentile: 100, max: 0}
+    - {field: status, horizon: 90, percentile: 100, max: 0}
+  max_missing: 0
+  # Goodhart guard (SPEC.md §7). max_identical is waived: here bit-identity is
+  # the whole point — three of the four fields are exact-match text and the
+  # fourth is a row count, so agreement is the requirement, not a symptom of a
+  # port that delegates. Independence is structural instead: ref links
+  # oracle/ref/sqldeep.cpp (frozen v0.21.0, its own lexer and renderer), port
+  # links dist/sqldeep.cpp (the deepparser AST pipeline) — separate
+  # translation units in separate binaries. The response probe stays armed.
+  independence:
+    waived: >-
+      exact-match text fields; identity is the acceptance criterion.
+      Independence is structural: two separately compiled transpilers.
+    min_response: 1.0
+  ratchet:
+    file: baseline-contract.yaml
+    tolerance: 0
+
+plants:
+  - {name: negated-order, env: {DH_PLANT: neg-order}}
+  - {name: stale-view,    env: {DH_PLANT: stale-view}}
