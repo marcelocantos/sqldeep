@@ -97,6 +97,7 @@ struct TestCase {
     std::string raw_sql;     // execute directly (no transpile)
     std::vector<std::string> expected;
     std::vector<std::string> expected_contains;
+    std::string expected_error;  // substring of the SQL error; query must fail
 
     // FK metadata
     struct FK {
@@ -138,6 +139,8 @@ std::vector<TestCase> load_tests() {
         if (node.contains("expected_contains"))
             for (auto& e : node["expected_contains"])
                 tc.expected_contains.push_back(e.get_value<std::string>());
+        if (node.contains("expected_error"))
+            tc.expected_error = node["expected_error"].get_value<std::string>();
 
         if (node.contains("fks")) {
             for (auto& fk_node : node["fks"]) {
@@ -185,6 +188,10 @@ TEST_CASE("sqlite integration") {
 
             std::vector<std::string> rows;
 
+            // Everything that can fail (transpile, exec, query) runs
+            // inside this lambda so an expected_error case can assert
+            // on the failure instead of aborting the subcase.
+            auto run = [&] {
             if (!tc.steps.empty()) {
                 // Multi-step test
                 for (const auto& step : tc.steps) {
@@ -222,9 +229,21 @@ TEST_CASE("sqlite integration") {
                 auto sql = transpile_str(tc.input);
                 rows = query(g.db, sql);
             }
+            };
 
             // Verify
-            if (!tc.expected_contains.empty()) {
+            if (!tc.expected_error.empty()) {
+                std::string msg;
+                try {
+                    run();
+                    FAIL("expected an error containing: " << tc.expected_error);
+                } catch (const std::runtime_error& e) {
+                    msg = e.what();
+                }
+                CHECK_MESSAGE(msg.find(tc.expected_error) != std::string::npos,
+                              "expected error containing \"" << tc.expected_error
+                              << "\", got: " << msg);
+            } else if (run(), !tc.expected_contains.empty()) {
                 REQUIRE(rows.size() == 1);
                 for (const auto& needle : tc.expected_contains)
                     CHECK_MESSAGE(rows[0].find(needle) != std::string::npos,

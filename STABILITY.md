@@ -55,6 +55,13 @@ Also registers `sqldeep_json`, `sqldeep_json_object`, `sqldeep_json_array`, and
 `sqldeep_json_group_array` as custom JSON functions that return BLOBs.
 Separate from `sqldeep.h` because it introduces a SQLite dependency.
 
+NULL handling (v0.24.0): a SQL NULL in a *structural* slot — an element tag,
+an attribute name, or an object key — is a SQL error of the form
+`<function>: <slot> must not be NULL`, never a process crash. NULL *values*
+keep their existing meaning: attribute and child values are skipped, JSON
+object/array values render as `null`, aggregates skip the row. The Swift port
+applies the same contract; Kotlin uses the C runtime via JNI.
+
 ### Version macros (`sqldeep.h`)
 
 | Macro | Value | Stability |

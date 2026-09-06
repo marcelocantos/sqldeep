@@ -40,6 +40,7 @@ fun main() {
         val rawSQL = tc["raw_sql"] as? String
         val expected = (tc["expected"] as? List<*>)?.map { it.toString() }
         val expectedContains = (tc["expected_contains"] as? List<*>)?.map { it.toString() }
+        val expectedError = tc["expected_error"] as? String
         val fks = tc["fks"] as? List<*>
         val steps = tc["steps"] as? List<*>
 
@@ -48,6 +49,27 @@ fun main() {
             // Setup
             for (sql in setup) {
                 SQLDeepTestHelper.execSQL(db, sql)
+            }
+
+            // Cases that must fail: the SQL error must contain expectedError.
+            if (expectedError != null) {
+                val sql = rawSQL ?: transpileInput(input!!, fks)
+                val msg = try {
+                    SQLDeepTestHelper.queryRows(db, sql)
+                    null
+                } catch (e: Exception) {
+                    e.message ?: ""
+                }
+                if (msg == null) {
+                    System.err.println("FAIL: $name — expected error containing \"$expectedError\", got none")
+                    failed++
+                } else if (expectedError !in msg) {
+                    System.err.println("FAIL: $name — expected error containing \"$expectedError\", got: $msg")
+                    failed++
+                } else {
+                    passed++
+                }
+                continue
             }
 
             // Execute

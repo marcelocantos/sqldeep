@@ -8,6 +8,7 @@ package sqldeep
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -23,6 +24,7 @@ type sqliteTestCase struct {
 	RawSQL           string         `yaml:"raw_sql"`
 	Expected         []string       `yaml:"expected"`
 	ExpectedContains []string       `yaml:"expected_contains"`
+	ExpectedError    string         `yaml:"expected_error"`
 	FKs              []yamlFK       `yaml:"fks"`
 	Steps            []sqliteStep   `yaml:"steps"`
 }
@@ -64,14 +66,24 @@ func execSQL(t *testing.T, db *sql.DB, sql string) {
 
 func queryRows(t *testing.T, db *sql.DB, sqlStr string) []string {
 	t.Helper()
+	results, err := queryRowsErr(db, sqlStr)
+	if err != nil {
+		t.Fatalf("%v\nSQL: %s", err, sqlStr)
+	}
+	return results
+}
+
+// queryRowsErr is queryRows with the SQL error returned rather than
+// failing the test, for cases that expect the query to fail.
+func queryRowsErr(db *sql.DB, sqlStr string) ([]string, error) {
 	rows, err := db.Query(sqlStr)
 	if err != nil {
-		t.Fatalf("Query: %v\nSQL: %s", err, sqlStr)
+		return nil, fmt.Errorf("Query: %w", err)
 	}
 	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
-		t.Fatalf("Columns: %v", err)
+		return nil, fmt.Errorf("Columns: %w", err)
 	}
 	var results []string
 	for rows.Next() {
@@ -82,7 +94,7 @@ func queryRows(t *testing.T, db *sql.DB, sqlStr string) []string {
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			t.Fatalf("Scan: %v", err)
+			return nil, fmt.Errorf("Scan: %w", err)
 		}
 		if vals[0].Valid {
 			results = append(results, vals[0].String)
@@ -91,9 +103,9 @@ func queryRows(t *testing.T, db *sql.DB, sqlStr string) []string {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
+		return nil, fmt.Errorf("rows.Err: %w", err)
 	}
-	return results
+	return results, nil
 }
 
 func TestSQLiteIntegration(t *testing.T) {
@@ -108,6 +120,26 @@ func TestSQLiteIntegration(t *testing.T) {
 			}
 
 			var rows []string
+
+			if tc.ExpectedError != "" {
+				var sqlStr string
+				if tc.RawSQL != "" {
+					sqlStr = tc.RawSQL
+				} else {
+					var err error
+					if sqlStr, err = Transpile(tc.Input); err != nil {
+						t.Fatalf("Transpile: %v", err)
+					}
+				}
+				_, err := queryRowsErr(db, sqlStr)
+				if err == nil {
+					t.Fatalf("expected an error containing %q, got none", tc.ExpectedError)
+				}
+				if !strings.Contains(err.Error(), tc.ExpectedError) {
+					t.Fatalf("expected error containing %q, got: %v", tc.ExpectedError, err)
+				}
+				return
+			}
 
 			switch {
 			case len(tc.Steps) > 0:

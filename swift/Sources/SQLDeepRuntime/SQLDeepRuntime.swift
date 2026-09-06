@@ -95,6 +95,19 @@ private func valueText(_ v: OpaquePointer?) -> String {
     return String(cString: p)
 }
 
+/// Text of a structural slot (element tag, attribute name, object key).
+/// Mirrors the C runtime: a SQL NULL in such a slot has no rendering and
+/// is reported as a SQL error.  Returns nil after setting the error; the
+/// caller must return at once.
+private func requiredText(_ ctx: OpaquePointer?, _ v: OpaquePointer?,
+                          _ fn: String, _ slot: String) -> String? {
+    guard sqlite3_value_type(v) != SQLITE_NULL else {
+        sqlite3_result_error(ctx, "\(fn): \(slot) must not be NULL", -1)
+        return nil
+    }
+    return valueText(v)
+}
+
 private func valueBlob(_ v: OpaquePointer?) -> Data {
     let n = sqlite3_value_bytes(v)
     guard n > 0, let p = sqlite3_value_blob(v) else { return Data() }
@@ -199,8 +212,8 @@ private let xmlAttrs: @convention(c) (OpaquePointer?, Int32, UnsafeMutablePointe
     var out = ""
     for i in stride(from: 0, to: Int(argc), by: 2) {
         let val = argv![i + 1]!
+        guard let name = requiredText(ctx, argv![i]!, "xml_attrs", "attribute name") else { return }
         guard sqlite3_value_type(val) != SQLITE_NULL else { continue }
-        let name = valueText(argv![i]!)
 
         // Boolean BLOB: sqldeep_json('true'/'false')
         if isBlob(val) {
@@ -221,7 +234,7 @@ private let xmlElement: @convention(c) (OpaquePointer?, Int32, UnsafeMutablePoin
         sqlite3_result_error(ctx, "xml_element requires at least 1 arg", -1)
         return
     }
-    var tag = valueText(argv![0]!)
+    guard var tag = requiredText(ctx, argv![0]!, "xml_element", "tag") else { return }
     let selfClosing = tag.hasSuffix("/")
     if selfClosing { tag = String(tag.dropLast()) }
 
@@ -298,8 +311,9 @@ private let xmlAttrsJsonml: @convention(c) (OpaquePointer?, Int32, UnsafeMutable
     var parts: [String] = []
     for i in stride(from: 0, to: Int(argc), by: 2) {
         let val = argv![i + 1]!
+        guard let rawName = requiredText(ctx, argv![i]!, "xml_attrs_jsonml", "attribute name") else { return }
         guard sqlite3_value_type(val) != SQLITE_NULL else { continue }
-        let name = jsonEscape(valueText(argv![i]!))
+        let name = jsonEscape(rawName)
         let v = jsonEscape(valueText(val))
         parts.append("\"" + name + "\":\"" + v + "\"")
     }
@@ -313,7 +327,7 @@ private let xmlElementJsonml: @convention(c) (OpaquePointer?, Int32, UnsafeMutab
         sqlite3_result_error(ctx, "xml_element_jsonml requires at least 1 arg", -1)
         return
     }
-    var tag = valueText(argv![0]!)
+    guard var tag = requiredText(ctx, argv![0]!, "xml_element_jsonml", "tag") else { return }
     if tag.hasSuffix("/") { tag = String(tag.dropLast()) }
 
     var childStart = 1
@@ -384,8 +398,9 @@ private let xmlAttrsJsx: @convention(c) (OpaquePointer?, Int32, UnsafeMutablePoi
     var parts: [String] = []
     for i in stride(from: 0, to: Int(argc), by: 2) {
         let val = argv![i + 1]!
+        guard let rawName = requiredText(ctx, argv![i]!, "xml_attrs_jsx", "attribute name") else { return }
         guard sqlite3_value_type(val) != SQLITE_NULL else { continue }
-        let name = "\"" + jsonEscape(valueText(argv![i]!)) + "\""
+        let name = "\"" + jsonEscape(rawName) + "\""
 
         // Check raw BEFORE sqlite3_value_text coerces BLOB→TEXT
         if jsxIsRaw(val) {
@@ -433,7 +448,8 @@ private let sqldeepJsonObject: @convention(c) (OpaquePointer?, Int32, UnsafeMuta
     }
     var parts: [String] = []
     for i in stride(from: 0, to: Int(argc), by: 2) {
-        let key = "\"" + jsonEscape(valueText(argv![i]!)) + "\""
+        guard let rawKey = requiredText(ctx, argv![i]!, "sqldeep_json_object", "key") else { return }
+        let key = "\"" + jsonEscape(rawKey) + "\""
         let val = jsonValueString(argv![i + 1]!)
         parts.append(key + ":" + val)
     }

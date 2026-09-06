@@ -28,6 +28,7 @@ class SQLiteIntegrationTest {
         val rawSql: String?,
         val expected: List<String>,
         val expectedContains: List<String>,
+        val expectedError: String?,
         val fks: List<ForeignKey>,
         val steps: List<Step>
     )
@@ -78,6 +79,7 @@ class SQLiteIntegrationTest {
                 rawSql = m["raw_sql"] as? String,
                 expected = @Suppress("UNCHECKED_CAST") ((m["expected"] as? List<Any?>)?.map { it.toString() } ?: emptyList()),
                 expectedContains = @Suppress("UNCHECKED_CAST") ((m["expected_contains"] as? List<Any?>)?.map { it.toString() } ?: emptyList()),
+                expectedError = m["expected_error"] as? String,
                 fks = fks,
                 steps = steps
             )
@@ -99,6 +101,23 @@ class SQLiteIntegrationTest {
                 // Setup
                 for (sql in tc.setup) {
                     SQLDeepTestHelper.execSQL(db, sql)
+                }
+
+                // Cases that must fail: the SQL error must contain expectedError.
+                if (tc.expectedError != null) {
+                    val sql = tc.rawSql ?: SQLDeep.transpile(tc.input!!)
+                    val msg = try {
+                        SQLDeepTestHelper.queryRows(db, sql)
+                        null
+                    } catch (e: Exception) {
+                        e.message ?: ""
+                    }
+                    if (msg == null) {
+                        failures.add("${tc.name}: expected error containing '${tc.expectedError}', got none")
+                    } else if (tc.expectedError !in msg) {
+                        failures.add("${tc.name}: expected error containing '${tc.expectedError}', got: $msg")
+                    }
+                    continue
                 }
 
                 val rows: Array<String> = when {

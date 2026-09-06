@@ -19,6 +19,7 @@ struct SQLiteTestCase: Decodable {
     let raw_sql: String?
     let expected: [String]?
     let expected_contains: [String]?
+    let expected_error: String?
     let fks: [FKDef]?
     let steps: [StepDef]?
 }
@@ -71,7 +72,8 @@ func queryRows(_ db: OpaquePointer, _ sql: String) throws -> [String] {
     defer { sqlite3_finalize(stmt) }
 
     var rows: [String] = []
-    while sqlite3_step(stmt) == SQLITE_ROW {
+    var rc = sqlite3_step(stmt)
+    while rc == SQLITE_ROW {
         if sqlite3_column_type(stmt, 0) == SQLITE_BLOB {
             let n = sqlite3_column_bytes(stmt, 0)
             if n > 0, let p = sqlite3_column_blob(stmt, 0) {
@@ -84,6 +86,12 @@ func queryRows(_ db: OpaquePointer, _ sql: String) throws -> [String] {
         } else {
             rows.append("NULL")
         }
+        rc = sqlite3_step(stmt)
+    }
+    // A runtime function error surfaces here, not at prepare time.
+    guard rc == SQLITE_DONE else {
+        throw NSError(domain: "SQLite", code: Int(rc),
+                      userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
     }
     return rows
 }
@@ -116,7 +124,7 @@ final class SQLiteIntegrationTests: XCTestCase {
         let yamlStr = try String(contentsOf: url, encoding: .utf8)
         let tests = try YAMLDecoder().decode([SQLiteTestCase].self, from: yamlStr)
 
-        XCTAssertEqual(tests.count, 79, "expected 79 test cases in sqlite.yaml")
+        XCTAssertEqual(tests.count, 91, "expected 91 test cases in sqlite.yaml")
 
         for tc in tests {
             let db = try openDB()
@@ -134,6 +142,20 @@ final class SQLiteIntegrationTests: XCTestCase {
 
             // Determine the query SQL and execute.
             var rows: [String]
+
+            if let wantErr = tc.expected_error {
+                // The query must fail with a message containing wantErr.
+                do {
+                    let sql = try tc.raw_sql ?? transpile(tc.input ?? "", fks: tc.fks)
+                    _ = try queryRows(db, sql)
+                    XCTFail("\(tc.name): expected an error containing \"\(wantErr)\", got none")
+                } catch {
+                    let msg = error.localizedDescription
+                    XCTAssertTrue(msg.contains(wantErr),
+                                  "\(tc.name): expected error containing \"\(wantErr)\", got \"\(msg)\"")
+                }
+                continue
+            }
 
             if let rawSQL = tc.raw_sql {
                 // raw_sql: execute directly, no transpilation.

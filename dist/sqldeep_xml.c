@@ -17,6 +17,30 @@ static int is_xml_blob(sqlite3_value *v) {
     return sqlite3_value_type(v) == SQLITE_BLOB;
 }
 
+// ── Argument helpers ────────────────────────────────────────────────
+
+/* Text of a structural slot: an element tag, an attribute name, or an
+   object key.  These functions are ordinary SQLite UDFs callable from
+   any SQL, so the slot can be SQL NULL (a nullable column, a computed
+   key).  NULL has no rendering in a structural position, so it is
+   reported as a SQL error instead of being dereferenced.  Returns NULL
+   after setting the error; the caller must return at once.  A second
+   read of the same slot in a fill pass may use sqlite3_value_text
+   directly: SQLite caches the conversion, so it cannot fail again. */
+static const char *required_text(sqlite3_context *ctx, sqlite3_value *v,
+                                 const char *fn, const char *slot) {
+    if (sqlite3_value_type(v) == SQLITE_NULL) {
+        char *msg = sqlite3_mprintf("%s: %s must not be NULL", fn, slot);
+        if (!msg) { sqlite3_result_error_nomem(ctx); return NULL; }
+        sqlite3_result_error(ctx, msg, -1);
+        sqlite3_free(msg);
+        return NULL;
+    }
+    const char *s = (const char *)sqlite3_value_text(v);
+    if (!s) sqlite3_result_error_nomem(ctx);
+    return s;
+}
+
 // ── Escaping helpers ────────────────────────────────────────────────
 
 static int xml_escaped_len(const char *s) {
@@ -53,7 +77,9 @@ static void sd_xml_attrs(sqlite3_context *ctx, int argc,
         return;
     }
     for (i = 0; i < argc; i += 2) {
-        const char *val;
+        const char *name, *val;
+        name = required_text(ctx, argv[i], "xml_attrs", "attribute name");
+        if (!name) return;
         if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
         /* sqldeep_json('true') / sqldeep_json('false') = boolean BLOB */
         if (sqlite3_value_type(argv[i + 1]) == SQLITE_BLOB) {
@@ -61,11 +87,11 @@ static void sd_xml_attrs(sqlite3_context *ctx, int argc,
             const char *b = (const char *)sqlite3_value_blob(argv[i + 1]);
             if (blen == 5 && memcmp(b, "false", 5) == 0) continue;
             /* true → bare attribute name */
-            len += 1 + (int)strlen((const char *)sqlite3_value_text(argv[i]));
+            len += 1 + (int)strlen(name);
             continue;
         }
         len += 1; /* space */
-        len += (int)strlen((const char *)sqlite3_value_text(argv[i]));
+        len += (int)strlen(name);
         val = (const char *)sqlite3_value_text(argv[i + 1]);
         len += 2 + xml_escaped_len(val); /* ="..." */
     }
@@ -116,7 +142,8 @@ static void sd_xml_element(sqlite3_context *ctx, int argc,
         sqlite3_result_error(ctx, "xml_element requires at least 1 arg", -1);
         return;
     }
-    const char *tag = (const char *)sqlite3_value_text(argv[0]);
+    const char *tag = required_text(ctx, argv[0], "xml_element", "tag");
+    if (!tag) return;
     int taglen = (int)strlen(tag);
     int self_closing = (taglen > 0 && tag[taglen - 1] == '/');
     if (self_closing) taglen--; /* strip trailing '/' from tag name */
@@ -303,9 +330,11 @@ static void sd_xml_attrs_jsonml(sqlite3_context *ctx, int argc,
     for (i = 0; i < argc; i += 2) {
         const char *name, *val;
         int namelen, vallen;
+        name = required_text(ctx, argv[i], "xml_attrs_jsonml",
+                             "attribute name");
+        if (!name) return;
         if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
         nattrs++;
-        name = (const char *)sqlite3_value_text(argv[i]);
         namelen = (int)strlen(name);
         val = (const char *)sqlite3_value_text(argv[i + 1]);
         vallen = (int)strlen(val);
@@ -349,7 +378,8 @@ static void sd_xml_element_jsonml(sqlite3_context *ctx, int argc,
         sqlite3_result_error(ctx, "xml_element_jsonml requires at least 1 arg", -1);
         return;
     }
-    const char *tag = (const char *)sqlite3_value_text(argv[0]);
+    const char *tag = required_text(ctx, argv[0], "xml_element_jsonml", "tag");
+    if (!tag) return;
     int taglen = (int)strlen(tag);
     if (taglen > 0 && tag[taglen - 1] == '/') taglen--; /* strip void marker */
     int child_start = 1;
@@ -495,11 +525,12 @@ static void sd_xml_attrs_jsx(sqlite3_context *ctx, int argc,
         const char *name;
         int namelen, vallen;
         int raw;
+        name = required_text(ctx, argv[i], "xml_attrs_jsx", "attribute name");
+        if (!name) return;
         if (sqlite3_value_type(argv[i + 1]) == SQLITE_NULL) continue;
         nattrs++;
         /* Check raw BEFORE sqlite3_value_text (which coerces BLOB→TEXT) */
         raw = jsx_is_raw(argv[i + 1]);
-        name = (const char *)sqlite3_value_text(argv[i]);
         namelen = (int)strlen(name);
         if (raw && sqlite3_value_type(argv[i + 1]) == SQLITE_BLOB) {
             vallen = sqlite3_value_bytes(argv[i + 1]);
@@ -636,7 +667,9 @@ static void sd_json_object(sqlite3_context *ctx, int argc,
     int len = 2; /* {} */
     int nfields = 0;
     for (int i = 0; i < argc; i += 2) {
-        const char *key = (const char *)sqlite3_value_text(argv[i]);
+        const char *key = required_text(ctx, argv[i], "sqldeep_json_object",
+                                        "key");
+        if (!key) return;
         int klen = (int)strlen(key);
         nfields++;
         len += 2 + json_escaped_len(key, klen); /* "key" */

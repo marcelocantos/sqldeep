@@ -10,6 +10,8 @@
 #   steps:    list of {transpile_exec: ...} or {transpile_query: ...} steps
 #   expected: list of expected result rows (strings); always an array
 #   expected_contains: list of substrings that must all appear in the single result row
+#   expected_error: substring the SQL error must contain (the query must fail;
+#             mutually exclusive with expected/expected_contains)
 
 # ── Single-table tests ──────────────────────────────────────────────
 
@@ -916,3 +918,63 @@
     - transpile_query: 'SELECT jsx(<div class="outer">{(SELECT col FROM v_inner)}</div>)'
   expected:
     - '["div",{"class":"outer"},["span",{"class":"green"},"hello"]]'
+
+# ── NULL in a structural slot (tag / attribute name / object key) ───
+#
+# Runtime functions are ordinary SQLite UDFs callable from any SQL with
+# any argument, including NULL from a nullable column.  A NULL tag, name
+# or key has no rendering, so the contract is a SQL error — never a
+# process crash (Fable F2 / ENT-001).
+
+- name: "xml_element NULL tag is an error"
+  raw_sql: "SELECT xml_element(NULL)"
+  expected_error: "tag must not be NULL"
+
+- name: "xml_element NULL tag from nullable column is an error"
+  raw_sql: "WITH t(x) AS (VALUES('a'),(NULL)) SELECT CAST(xml_element(x) AS TEXT) FROM t"
+  expected_error: "tag must not be NULL"
+
+- name: "xml_attrs NULL name is an error"
+  raw_sql: "SELECT xml_attrs(NULL, 'v')"
+  expected_error: "attribute name must not be NULL"
+
+- name: "xml_attrs NULL name with boolean value is an error"
+  raw_sql: "SELECT xml_attrs(NULL, sqldeep_json('true'))"
+  expected_error: "attribute name must not be NULL"
+
+- name: "xml_element_jsonml NULL tag is an error"
+  raw_sql: "SELECT xml_element_jsonml(NULL)"
+  expected_error: "tag must not be NULL"
+
+- name: "xml_attrs_jsonml NULL name is an error"
+  raw_sql: "SELECT xml_attrs_jsonml(NULL, 'v')"
+  expected_error: "attribute name must not be NULL"
+
+- name: "xml_element_jsx NULL tag is an error"
+  raw_sql: "SELECT xml_element_jsx(NULL)"
+  expected_error: "tag must not be NULL"
+
+- name: "xml_attrs_jsx NULL name is an error"
+  raw_sql: "SELECT xml_attrs_jsx(NULL, 'v')"
+  expected_error: "attribute name must not be NULL"
+
+- name: "sqldeep_json_object NULL key is an error"
+  raw_sql: "SELECT sqldeep_json_object(NULL, 1)"
+  expected_error: "key must not be NULL"
+
+- name: "computed key NULL literal is an error"
+  input: "SELECT {(NULL): 1}"
+  expected_error: "key must not be NULL"
+
+- name: "computed key NULL from column is an error"
+  setup:
+    - "CREATE TABLE t(k TEXT, v INT)"
+    - "INSERT INTO t VALUES('a', 1)"
+    - "INSERT INTO t VALUES(NULL, 2)"
+  input: "SELECT {(k): v} FROM t"
+  expected_error: "key must not be NULL"
+
+- name: "NULL value slots are still skipped, not errors"
+  raw_sql: "SELECT CAST(xml_element('a', xml_attrs('href', NULL), NULL) AS TEXT)"
+  expected:
+    - '<a></a>'
