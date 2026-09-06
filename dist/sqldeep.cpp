@@ -1598,6 +1598,32 @@ private:
 
 // ── End-to-end pipeline ──────────────────────────────────────────────
 
+// Deepparser formats errors as "LINE:COL: message"; parse out the
+// position so callers can highlight the source.
+Error parse_error(const std::string& msg) {
+    int line = 0, col = 0;
+    (void)std::sscanf(msg.c_str(), "%d:%d", &line, &col);
+    return Error(msg, line, col);
+}
+
+// For input that only parsed once wrapped as `SELECT <input>`: the lone
+// result-column expression if the wrapper is exactly `SELECT <expr>`
+// with nothing else — no FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT,
+// WITH, RECURSE, a second column, or a compound — otherwise nullptr.
+LpNode *bare_expression_of(const LpNodeList *stmts) {
+    if (stmts->count != 1) return nullptr;
+    LpNode *sel = stmts->items[0];
+    if (!sel || sel->kind != LP_STMT_SELECT) return nullptr;
+    const auto& s = sel->u.select;
+    if (s.result_columns.count != 1 || s.from || s.where
+        || s.group_by.count != 0 || s.having || s.order_by.count != 0
+        || s.limit || s.with || s.sqldeep_recurse)
+        return nullptr;
+    LpNode *rc = s.result_columns.items[0];
+    return (rc && rc->kind == LP_RESULT_COLUMN) ? rc->u.result_column.expr
+                                                 : rc;
+}
+
 std::string transpile_impl(const std::string& input,
                             const std::vector<ForeignKey>* fks,
                             Backend backend) {
@@ -1612,19 +1638,16 @@ std::string transpile_impl(const std::string& input,
     const char *parse_err = nullptr;
     LpNodeList *stmts = lp_parse_all(input.c_str(), arena, &parse_err);
     bool bare_expr = false;
+    // The statement-level parse error, kept so the bare-expression
+    // fallback can report it when the wrapped form is not an expression.
+    std::string stmt_parse_err = parse_err ? parse_err : "parse error";
     if (!stmts) {
         std::string wrapped = "SELECT " + input;
         const char *err2 = nullptr;
         stmts = lp_parse_all(wrapped.c_str(), arena, &err2);
         if (!stmts) {
-            std::string msg = parse_err ? parse_err
-                              : (err2 ? err2 : "parse error");
-            // Deepparser formats errors as "LINE:COL: message"; parse
-            // out the position so callers can highlight the source.
-            int line = 0, col = 0;
-            (void)std::sscanf(msg.c_str(), "%d:%d", &line, &col);
             arena_destroy(arena);
-            throw Error(msg, line, col);
+            throw parse_error(stmt_parse_err);
         }
         bare_expr = true;
     }
@@ -1649,25 +1672,33 @@ std::string transpile_impl(const std::string& input,
     }
 
     std::string out;
-    if (bare_expr && stmts->count == 1) {
-        // Extract just the single result-column expression so the
-        // caller sees the bare transformed form.
-        LpNode *sel = stmts->items[0];
-        if (sel && sel->kind == LP_STMT_SELECT
-            && sel->u.select.result_columns.count == 1) {
-            LpNode *rc = sel->u.select.result_columns.items[0];
-            LpNode *expr = (rc && rc->kind == LP_RESULT_COLUMN)
-                              ? rc->u.result_column.expr : rc;
-            if (expr) {
-                char *sql = lp_ast_to_sql(expr, arena);
-                if (sql) out = sql;
-            }
+    if (bare_expr) {
+        // The fallback exists for genuine fragments (`<div/>`, `{a, b}`,
+        // `a + b`). Only a lone expression qualifies: anything that
+        // parsed as a compound, a list, or a SELECT with clauses is a
+        // mistyped statement, and the honest answer is the original
+        // parse error (Fable F3: never return empty or clause-stripped
+        // SQL as success).
+        LpNode *expr = bare_expression_of(stmts);
+        if (!expr) {
+            arena_destroy(arena);
+            throw parse_error(stmt_parse_err);
         }
+        char *sql = lp_ast_to_sql(expr, arena);
+        if (!sql) {
+            arena_destroy(arena);
+            throw Error("internal: unparse failed", 0, 0);
+        }
+        out = sql;
     } else {
         for (int i = 0; i < stmts->count; i++) {
             if (i > 0) out += "; ";
             char *sql = lp_ast_to_sql(stmts->items[i], arena);
-            if (sql) out += sql;
+            if (!sql) {
+                arena_destroy(arena);
+                throw Error("internal: unparse failed", 0, 0);
+            }
+            out += sql;
         }
     }
 

@@ -1131,6 +1131,24 @@ errors:
   - name: alias from a previous statement does not leak
     input: "SELECT * FROM customers c; SELECT { id } FROM c->orders o"
 
+  # Bare-expression fallback must fail closed (Fable F3): input that is
+  # not a single expression is a parse error, never empty or clause-
+  # stripped SQL returned as success.
+  - name: bare expression list is a parse error
+    input: "a, b"
+
+  - name: bare literal list is a parse error
+    input: "1, 2"
+
+  - name: bare compound select is a parse error
+    input: "1 UNION SELECT 2"
+
+  - name: bare expression with FROM is a parse error
+    input: "x FROM t"
+
+  - name: bare expression with trailing WHERE is a parse error
+    input: "x WHERE 1"
+
 fk_errors:
   - name: fk missing error
     input: "SELECT { orders: SELECT { total } FROM c->orders o } FROM customers c"
