@@ -443,6 +443,9 @@ private:
             case LP_STMT_CREATE_VIEW:
                 build_alias_map(node->u.create_view.select);
                 break;
+            case LP_STMT_CREATE_TABLE:
+                build_alias_map(node->u.create_table.as_select);
+                break;
             default:
                 break;
         }
@@ -689,6 +692,10 @@ private:
             case LP_STMT_CREATE_VIEW:
                 node->u.create_view.select =
                     walk(node->u.create_view.select, depth, mode);
+                break;
+            case LP_STMT_CREATE_TABLE:
+                node->u.create_table.as_select =
+                    walk(node->u.create_table.as_select, depth, mode);
                 break;
             case LP_STMT_INSERT:
                 node->u.insert.source = walk(node->u.insert.source, depth, mode);

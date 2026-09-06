@@ -202,6 +202,31 @@ convention:
     input: "CREATE VIEW v AS SELECT jsonml(<b>text</b>) FROM t"
     expected: "CREATE VIEW v AS SELECT xml_element_jsonml('b', 'text') FROM t"
 
+  # CREATE TABLE ... AS <select> — same transform surface as CREATE VIEW
+  - name: create table as select with object
+    input: "CREATE TABLE t1 AS SELECT { id, name } FROM t"
+    expected: "CREATE TABLE t1 AS SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
+    expected_postgres: "CREATE TABLE t1 AS SELECT jsonb_build_object('id', id, 'name', name) FROM t"
+
+  - name: create table as from-first select
+    input: "CREATE TABLE t2 AS FROM t SELECT { name }"
+    expected: "CREATE TABLE t2 AS SELECT sqldeep_json_object('name', name) FROM t"
+    expected_postgres: "CREATE TABLE t2 AS SELECT jsonb_build_object('name', name) FROM t"
+
+  - name: create temp table as select with object
+    input: "CREATE TEMP TABLE t3 AS SELECT { id } FROM t"
+    expected: "CREATE TEMP TABLE t3 AS SELECT sqldeep_json_object('id', id) FROM t"
+    expected_postgres: "CREATE TEMP TABLE t3 AS SELECT jsonb_build_object('id', id) FROM t"
+
+  - name: create table as select with xml
+    input: "CREATE TABLE t4 AS SELECT <div>{name}</div> FROM t"
+    expected: "CREATE TABLE t4 AS SELECT xml_element('div', name) FROM t"
+
+  - name: insert from sqldeep select
+    input: "INSERT INTO dst SELECT { id, name } FROM t"
+    expected: "INSERT INTO dst SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
+    expected_postgres: "INSERT INTO dst SELECT jsonb_build_object('id', id, 'name', name) FROM t"
+
   - name: number with trailing dot not absorbed
     input: "SELECT 1.0 + 2 FROM t"
     expected: "SELECT 1.0 + 2 FROM t"
