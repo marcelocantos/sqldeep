@@ -164,9 +164,10 @@ std::string query(Rng& r, const State& s) {
 }
 
 // gNoCtas drops CREATE TABLE ... AS <sqldeep> from the tape (--no-ctas). It
-// exists so the in-contract subset can be run separately from the full tape:
-// CTAS over sqldeep syntax has no golden in testdata/, and the current
-// deepparser pipeline does not transpile it at all (see oracle/README.md).
+// exists so the narrow in-contract subset can be run separately from the full
+// tape; both are gated. CTAS was the divergence the wide tape found (now
+// fixed and goldened — see oracle/README.md), and the split is kept as a
+// bisecting aid, not as a way to hide it.
 bool gNoCtas = false;
 
 // Persist transpiler output as a view (or a snapshot table) so later ticks

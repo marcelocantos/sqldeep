@@ -93,11 +93,11 @@ build/cmd/{name}.o: cmd/{name}.c
 lazy dh = $[shell command -v dh 2>/dev/null || echo ~/think/differential-harness/bin/dh]
 oracle_bins = build/oracle/ref build/oracle/port build/oracle/tapegen
 
-# The contract manifest gates; the wide tape is advisory (it is red on the
-# open CREATE-TABLE-AS finding — see oracle/README.md) and must not be
-# silently dropped to keep the gate green.
+# Both manifests gate. The contract tape is the narrow subset kept for
+# bisecting; the wide tape (which includes CREATE TABLE ... AS <sqldeep>)
+# went green when CTAS transpilation landed, so it is no longer advisory.
 !oracle: $oracle_bins
-    cd oracle && "$dh" check harness-contract.yaml && "$dh" selftest harness-contract.yaml && { "$dh" check -q harness.yaml || echo "oracle: wide tape still red (see oracle/README.md)"; }
+    cd oracle && "$dh" check harness-contract.yaml && "$dh" selftest harness-contract.yaml && "$dh" check harness.yaml
 
 !oracle-study: $oracle_bins
     cd oracle && "$dh" study $SEED $MANIFEST

@@ -15,36 +15,29 @@ shared but the tape and vendored SQLite.
 
 ## Running
 
-    cv oracle          # both manifests: contract subset (gated) + full tape (advisory)
+    cv oracle          # both manifests: contract subset + full tape (both gated)
     cv oracle-study SEED=<hex>
 
-## Two manifests, deliberately
+## Two manifests, both gated
 
-`harness-contract.yaml` is the gated one: the tape omits `CREATE TABLE … AS
-<sqldeep>`, and the two transpilers agree **exactly** — zero divergence on
-every field at every horizon out to 90 statements, across 200 seeded scripts.
-That is the baseline in `baseline-contract.yaml`.
+`harness-contract.yaml` runs the narrow tape: it omits `CREATE TABLE …  AS
+<sqldeep>`. `harness.yaml` runs the wide tape, which includes it. Both are
+gated by `cv oracle`, and both are green — zero divergence on every field at
+every horizon out to 90 statements, across 200 seeded scripts. Baselines:
+`baseline-contract.yaml` and `baseline.yaml`.
 
-`harness.yaml` runs the wider tape and is **red**. It stays because narrowing a
-tape until the number goes green is precisely the Goodhart move this harness
-exists to prevent: the narrowed tape lives beside the wide one, never instead
-of it.
+The narrow tape stays because it is the useful bisecting subset, not because
+it makes a number go green: narrowing a tape until acceptance passes is
+precisely the Goodhart move this harness exists to prevent, so the narrowed
+tape lives beside the wide one, never instead of it.
 
-## The open finding
+## The finding this harness caught (closed)
 
-`CREATE TABLE t AS <sqldeep-select>` is not transpiled at all by the current
-pipeline — the sqldeep syntax reaches SQLite verbatim and is rejected.
-`CREATE VIEW … AS` and a bare `SELECT` both work, so it is specific to CTAS.
-Minimal repro, both binaries reading the same two-line tape:
-
-    IN : CREATE TABLE t1 AS SELECT { customers_id, name } FROM customers
-    REF: ok  CREATE TABLE t1 AS SELECT json_object('customers_id', customers_id, 'name', name) FROM customers
-    PRT: exec_error  unrecognized token: "{"  CREATE TABLE t1 AS SELECT {customers_id, name} FROM customers
-
-    IN : CREATE TABLE t3 AS FROM customers SELECT { name }
-    REF: ok  CREATE TABLE t3 AS SELECT json_object('name', name) FROM customers
-    PRT: exec_error  near "FROM": syntax error
-
-There is no golden for CTAS in `testdata/`, so this surface is untested by the
-regular suite; whether it is in contract is a product decision. Until that is
-settled the wide tape reports it and the contract tape gates.
+`CREATE TABLE t AS <sqldeep-select>` was not transpiled at all: the
+`Transformer` walked `LP_STMT_CREATE_VIEW`'s child select but had no case for
+`LP_STMT_CREATE_TABLE`, so the sqldeep syntax reached SQLite verbatim and was
+rejected. `CREATE VIEW … AS`, `INSERT … SELECT` and a bare `SELECT` all worked,
+which is why nothing else saw it. The wide tape was red on it from the day it
+was written and is green now that `dist/sqldeep.cpp` walks
+`create_table.as_select`; `testdata/transpile.yaml` and `testdata/sqlite.yaml`
+carry the goldens.
