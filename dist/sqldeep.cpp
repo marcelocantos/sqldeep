@@ -327,6 +327,11 @@ public:
 
     // Mutate the AST in place. Returns the (possibly new) root node.
     LpNode *transform(LpNode *node) {
+        // One Transformer is reused across the statements of a script, so
+        // the alias map must start empty each time or a `c->orders` join
+        // in a later statement could resolve `c` to a table named only in
+        // an earlier one (Fable FO5, cross-statement leak).
+        alias_map_.clear();
         build_alias_map(node);
         return walk(node, /*depth=*/0, XmlMode::Xml);
     }

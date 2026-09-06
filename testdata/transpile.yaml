@@ -1126,6 +1126,11 @@ errors:
 
 # ── FK-guided error cases ────────────────────────────────────────────
 
+  # Alias resolution is per statement: an alias from an earlier statement
+  # must not satisfy a join path in a later one (Fable FO5).
+  - name: alias from a previous statement does not leak
+    input: "SELECT * FROM customers c; SELECT { id } FROM c->orders o"
+
 fk_errors:
   - name: fk missing error
     input: "SELECT { orders: SELECT { total } FROM c->orders o } FROM customers c"
