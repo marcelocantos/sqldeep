@@ -239,14 +239,46 @@ typedef struct XmlAggCtx {
     char *buf;
     int len;
     int cap;
+    int failed;   /* an earlier step already reported an error */
 } XmlAggCtx;
 
-static void xml_agg_append(XmlAggCtx *p, const char *s, int n) {
-    if (p->len + n >= p->cap) {
-        int newcap = (p->cap + n) * 2 + 64;
-        p->buf = (char *)sqlite3_realloc(p->buf, newcap);
-        p->cap = newcap;
+/* Growth slack so a run of small appends does not realloc every time. */
+#define AGG_GROW_SLACK 64
+
+/* Make room for n more bytes (plus a NUL).  Returns 1 on success.  On
+   failure the buffer is released, the context is marked failed so later
+   steps are no-ops, and the SQL error is set — the caller must return.
+   Capacity math is 64-bit and bounded by the connection's length limit
+   so it cannot wrap the int fields. */
+static int agg_reserve(sqlite3_context *ctx, XmlAggCtx *p, int n) {
+    if (p->failed) return 0;
+    if (p->len + (sqlite3_int64)n < p->cap) return 1;
+    sqlite3_int64 need = (sqlite3_int64)p->len + n + 1;
+    sqlite3_int64 limit = sqlite3_limit(sqlite3_context_db_handle(ctx),
+                                        SQLITE_LIMIT_LENGTH, -1);
+    if (need > limit) {
+        sqlite3_free(p->buf);
+        p->buf = NULL; p->len = 0; p->cap = 0; p->failed = 1;
+        sqlite3_result_error_toobig(ctx);
+        return 0;
     }
+    sqlite3_int64 newcap = need * 2 + AGG_GROW_SLACK;
+    if (newcap > limit + 1) newcap = limit + 1;
+    char *nb = (char *)sqlite3_realloc64(p->buf, (sqlite3_uint64)newcap);
+    if (!nb) {
+        sqlite3_free(p->buf);
+        p->buf = NULL; p->len = 0; p->cap = 0; p->failed = 1;
+        sqlite3_result_error_nomem(ctx);
+        return 0;
+    }
+    p->buf = nb;
+    p->cap = (int)newcap;
+    return 1;
+}
+
+static void xml_agg_append(sqlite3_context *ctx, XmlAggCtx *p,
+                           const char *s, int n) {
+    if (!agg_reserve(ctx, p, n)) return;
     memcpy(p->buf + p->len, s, n);
     p->len += n;
 }
@@ -257,17 +289,18 @@ static void sd_xml_agg_step(sqlite3_context *ctx, int argc,
     if (sqlite3_value_type(argv[0]) == SQLITE_NULL) return;
     XmlAggCtx *p = (XmlAggCtx *)sqlite3_aggregate_context(ctx, sizeof(*p));
     if (!p) return;
+    if (p->failed) return;
     if (is_xml_blob(argv[0])) {
         int blen = sqlite3_value_bytes(argv[0]);
-        xml_agg_append(p, (const char *)sqlite3_value_blob(argv[0]), blen);
+        xml_agg_append(ctx, p, (const char *)sqlite3_value_blob(argv[0]), blen);
     } else {
         const char *v = (const char *)sqlite3_value_text(argv[0]);
-        for (const char *c = v; *c; ++c) {
+        for (const char *c = v; *c && !p->failed; ++c) {
             switch (*c) {
-            case '<': xml_agg_append(p, "&lt;", 4); break;
-            case '>': xml_agg_append(p, "&gt;", 4); break;
-            case '&': xml_agg_append(p, "&amp;", 5); break;
-            default: xml_agg_append(p, c, 1); break;
+            case '<': xml_agg_append(ctx, p, "&lt;", 4); break;
+            case '>': xml_agg_append(ctx, p, "&gt;", 4); break;
+            case '&': xml_agg_append(ctx, p, "&amp;", 5); break;
+            default: xml_agg_append(ctx, p, c, 1); break;
             }
         }
     }
@@ -477,21 +510,17 @@ static void sd_jsonml_agg_step(sqlite3_context *ctx, int argc,
     if (sqlite3_value_type(argv[0]) == SQLITE_NULL) return;
     XmlAggCtx *p = (XmlAggCtx *)sqlite3_aggregate_context(ctx, sizeof(*p));
     if (!p) return;
-    if (p->len > 0) xml_agg_append(p, ",", 1);
+    if (p->failed) return;
+    if (p->len > 0) xml_agg_append(ctx, p, ",", 1);
     if (is_xml_blob(argv[0])) {
         int blen = sqlite3_value_bytes(argv[0]);
-        xml_agg_append(p, (const char *)sqlite3_value_blob(argv[0]), blen);
+        xml_agg_append(ctx, p, (const char *)sqlite3_value_blob(argv[0]), blen);
     } else {
         /* Text child — emit as JSON string */
         const char *v = (const char *)sqlite3_value_text(argv[0]);
         int vlen = (int)strlen(v);
         int elen = 2 + json_escaped_len(v, vlen);
-        /* Ensure capacity and write directly */
-        if (p->len + elen >= p->cap) {
-            int newcap = (p->cap + elen) * 2 + 64;
-            p->buf = (char *)sqlite3_realloc(p->buf, newcap);
-            p->cap = newcap;
-        }
+        if (!agg_reserve(ctx, p, elen)) return;
         p->buf[p->len++] = '"';
         json_escape_to(v, vlen, p->buf, &p->len);
         p->buf[p->len++] = '"';
@@ -743,16 +772,12 @@ static void sd_json_group_array_step(sqlite3_context *ctx, int argc,
     if (sqlite3_value_type(argv[0]) == SQLITE_NULL) return;
     XmlAggCtx *p = (XmlAggCtx *)sqlite3_aggregate_context(ctx, sizeof(*p));
     if (!p) return;
-    if (p->len > 0) xml_agg_append(p, ",", 1);
+    if (p->failed) return;
+    if (p->len > 0) xml_agg_append(ctx, p, ",", 1);
 
     /* Compute the JSON representation and append it. */
     int vlen = json_value_len(argv[0]);
-    /* Ensure capacity */
-    if (p->len + vlen >= p->cap) {
-        int newcap = (p->cap + vlen) * 2 + 64;
-        p->buf = (char *)sqlite3_realloc(p->buf, newcap);
-        p->cap = newcap;
-    }
+    if (!agg_reserve(ctx, p, vlen)) return;
     json_append_value(argv[0], p->buf, &p->len);
 }
 

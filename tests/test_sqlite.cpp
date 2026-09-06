@@ -324,3 +324,66 @@ TEST_CASE("positional parameters bind by source order") {
         sqldeep_free(err);
     }
 }
+
+// ── Runtime memory-safety under allocation failure ──────────────────
+//
+// Aggregates grow their buffer with sqlite3_realloc. A hard heap limit
+// makes that call return NULL part-way through a large aggregate; the
+// step must report SQLITE_NOMEM, not write through the NULL buffer.
+
+namespace {
+
+// Run `sql` to completion, returning the final step code (SQLITE_DONE on
+// success, or the error code) without throwing.
+int step_to_end(sqlite3* db, const std::string& sql) {
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) return rc;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {}
+    sqlite3_finalize(stmt);
+    return rc;
+}
+
+// Large enough for setup and the statement itself, small enough that a
+// multi-megabyte aggregate exhausts it.
+constexpr sqlite3_int64 kHeapLimitBytes = 4 * 1024 * 1024;
+
+// Rows in the generator CTE; each contributes ~100 bytes of markup so the
+// aggregate needs well over kHeapLimitBytes.
+constexpr int kAggRows = 200000;
+
+// Restores the process-wide heap limit when the test scope ends.
+struct HeapLimitGuard {
+    sqlite3_int64 prior;
+    explicit HeapLimitGuard(sqlite3_int64 limit)
+        : prior(sqlite3_hard_heap_limit64(limit)) {}
+    ~HeapLimitGuard() { sqlite3_hard_heap_limit64(prior); }
+};
+
+const char* kBigAggSql[] = {
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < "
+    "200000) SELECT xml_agg(xml_element('p', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')) FROM n",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < "
+    "200000) SELECT jsonml_agg(xml_element_jsonml('p', 'xxxxxxxxxxxxxxxxxxxxxxxxx"
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')) FROM n",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < "
+    "200000) SELECT jsonml_agg('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx') FROM n",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < "
+    "200000) SELECT sqldeep_json_group_array('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx') FROM n",
+};
+
+} // namespace
+
+TEST_CASE("aggregate realloc failure is SQLITE_NOMEM, not a crash") {
+    static_assert(kAggRows == 200000, "kBigAggSql row count must match kAggRows");
+    Db g;
+    HeapLimitGuard limit(kHeapLimitBytes);
+    for (const char* sql : kBigAggSql) {
+        CAPTURE(sql);
+        int rc = step_to_end(g.db, sql);
+        CHECK(rc == SQLITE_NOMEM);
+    }
+}
