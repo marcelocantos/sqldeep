@@ -2,8 +2,9 @@
 
 A transpiler that converts JSON5-like SQL syntax into standard SQL with
 database-specific JSON functions. Write nested JSON queries naturally; sqldeep
-rewrites them into `sqldeep_json_object()` / `jsonb_build_object()`, etc. Supports
-SQLite (default) and PostgreSQL backends.
+rewrites them into `sqldeep_json_object()` / `jsonb_build_object()`, etc. Three
+backends: SQLite (default), PostgreSQL, and vanilla SQLite (built-in `json_*`
+functions only).
 
 ## Example
 
@@ -67,7 +68,7 @@ FROM users SELECT { id, name }
 -- → SELECT sqldeep_json_object('id', id, 'name', name) FROM users
 ```
 
-Three field forms:
+Four field forms:
 
 | Form | Example | Output |
 |---|---|---|
@@ -307,11 +308,35 @@ char* sql2 = sqldeep_transpile_fk(input, fks, 1,
 // PostgreSQL backend:
 char* sql3 = sqldeep_transpile_backend(input, SQLDEEP_POSTGRES,
                                         &err_msg, &err_line, &err_col);
+
+// FK-guided + explicit backend:
+char* sql4 = sqldeep_transpile_fk_backend(input, fks, 1, SQLDEEP_SQLITE_VANILLA,
+                                           &err_msg, &err_line, &err_col);
+
+const char* v = sqldeep_version();  // e.g. "0.23.0"; do not free
 ```
 
 On error, functions return `NULL` and set the `err_msg`, `err_line`, and
 `err_col` out-parameters. Free returned strings (including error messages) with
 `sqldeep_free()`.
+
+### Backends
+
+`sqldeep_backend` selects the emitted function family:
+
+| Value | Emits | Notes |
+|---|---|---|
+| `SQLDEEP_SQLITE` (0, default) | `sqldeep_json_object`, `sqldeep_json_array`, `sqldeep_json_group_array` | BLOB protocol; needs `sqldeep_register_sqlite()` |
+| `SQLDEEP_POSTGRES` (1) | `jsonb_build_object`, `jsonb_build_array`, `jsonb_agg` | Built-in PostgreSQL functions |
+| `SQLDEEP_SQLITE_VANILLA` (2) | `json_object`, `json_array`, `json_group_array` | Stock SQLite only — no registration step, no BLOB typing |
+
+All other SQL (JOIN, WHERE, LIMIT, …) is standard and identical across backends.
+Per-item stability levels for every symbol above are catalogued in
+[STABILITY.md](STABILITY.md).
+
+The Go binding exposes the same choice as `Transpile`, `TranspilePostgres`,
+`TranspileVanilla`, `TranspileBackend` and their `FK` counterparts
+(`go/sqldeep/sqldeep.go`).
 
 ## Installing
 
@@ -322,17 +347,26 @@ available via Homebrew:
 brew install marcelocantos/tap/sqldeep
 ```
 
-To embed the transpiler in your own project, copy `dist/sqldeep.h` and
-`dist/sqldeep.cpp` and compile as C++20; there are no link-time dependencies.
+To embed the transpiler in your own project, see
+[Integration → C/C++](#cc) — `dist/sqldeep.cpp` is compiled together with the
+[deepparser](https://github.com/marcelocantos/deepparser) sources it parses
+with.
 
 ## Building
 
 ```sh
-git clone https://github.com/marcelocantos/sqldeep.git
+git clone --recurse-submodules https://github.com/marcelocantos/sqldeep.git
 cd sqldeep
 cv test     # run tests
 cv example  # run the demo
+cv lib      # build build/libsqldeep.a
+cv clean    # remove build/
 ```
+
+The `vendor/deepparser` submodule is **required** — `dist/sqldeep.cpp` includes
+its `liteparser.h`. Cloning without `--recurse-submodules` fails the build with
+`fatal error: 'liteparser.h' file not found`; recover with
+`git submodule update --init --recursive`.
 
 Requires C++20 and [cv](https://github.com/marcelocantos/cv).
 
@@ -352,8 +386,12 @@ with sqldeep transpilation and XML functions (`xml_element`, `xml_attrs`,
 
 ### C/C++
 
-Copy `dist/sqldeep.h` and `dist/sqldeep.cpp` into your project and compile as
-C++20. No external dependencies at runtime.
+Copy `dist/sqldeep.h` and `dist/sqldeep.cpp` into your project, and build them
+alongside the deepparser sources (`vendor/deepparser/src/{arena,liteparser,
+lp_tokenize,lp_unparse,parse}.c`) that `sqldeep.cpp` includes and calls. Compile
+the C++ as C++20. Alternatively, `cv lib` produces `build/libsqldeep.a`, which
+bundles the deepparser objects so downstream callers need only `-lsqldeep`.
+There are no dependencies at runtime.
 
 For SQLite targets, also include `dist/sqldeep_xml.h` and `dist/sqldeep_xml.c`.
 These provide the full set of custom SQLite functions that transpiled SQL calls:
@@ -397,12 +435,14 @@ output, err := sqldeep.Transpile(input)
 
 ### Swift
 
-The `swift/` directory contains a Swift Package with two components:
+The `swift/` directory contains a Swift Package exposing one library product,
+`SQLDeepRuntime`, with two parts:
 
-- **SQLDeepRuntime** — pure Swift port of all SQLite runtime functions
-  (JSON, XML, JSONML, JSX). Call `sqldeepRegisterSQLite(db)` once per connection.
-- **Transpiler** — Swift wrapper around the C transpiler API via a `CSQLDeep`
-  clang module.
+- **Runtime** (`Sources/SQLDeepRuntime/SQLDeepRuntime.swift`) — pure Swift port
+  of all SQLite runtime functions (JSON, XML, JSONML, JSX). Call
+  `sqldeepRegisterSQLite(db)` once per connection.
+- **Transpiler** (`Sources/SQLDeepRuntime/Transpiler.swift`) — `sqldeepTranspile`
+  / `sqldeepTranspileFK` over the C API via the `CSQLDeep` clang module target.
 
 ```swift
 import SQLDeepRuntime

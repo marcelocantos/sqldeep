@@ -1,16 +1,21 @@
 # sqldeep — Agent Guide
 
 Transpiler: JSON5-like SQL syntax → standard SQL with database-specific JSON
-functions. C header with C++20 implementation. Zero runtime dependencies.
-Supports SQLite (default) and PostgreSQL backends.
+functions. C header with C++20 implementation. No runtime database dependency;
+parses via the vendored deepparser C sources. Backends: SQLite (default),
+PostgreSQL, and vanilla SQLite (`SQLDEEP_SQLITE_VANILLA`, built-in `json_*`).
 
 ## Integration
 
 ### C/C++
 
 Copy the `dist/` files (`sqldeep.h` and `sqldeep.cpp`) into your project and
-compile as C++20. No link-time dependencies — the database is only needed at
-runtime by the *caller*, not by sqldeep itself.
+compile as C++20, together with the deepparser sources `sqldeep.cpp` includes
+(`arena.c`, `liteparser.c`, `lp_tokenize.c`, `lp_unparse.c`, `parse.c` from
+`vendor/deepparser/src`, vendored from
+https://github.com/marcelocantos/deepparser). `cv lib` bundles them into
+`build/libsqldeep.a` if you prefer a single `-lsqldeep`. No database dependency
+— the database is only needed at runtime by the *caller*, not by sqldeep.
 
 For SQLite targets, also include `sqldeep_xml.h` and `sqldeep_xml.c`. These
 register all custom SQLite functions that transpiled SQL calls — both XML

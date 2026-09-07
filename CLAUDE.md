@@ -7,13 +7,17 @@ Single public C header (`sqldeep.h`) with implementation in `sqldeep.cpp`.
 ## Build
 
 ```sh
-cv test     # build and run all tests
-mk example  # build and run examples/demo.cpp
-cv clean    # remove build/
+git submodule update --init --recursive  # vendor/deepparser is required
+cv test     # build and run all tests (11 cases, 696 assertions)
+cv example  # build and run examples/demo.cpp
+cv shell    # build build/sqldeep (SQLite shell with sqldeep built in)
+cv lib      # build build/libsqldeep.a
+cv clean    # remove build/ and .cv/
 ```
 
 Requires C++20. Uses [cv](https://github.com/marcelocantos/cv) as the build
-system (`cvfile`).
+system (`cvfile`). Without the submodule the build fails at
+`dist/sqldeep.cpp:17` with `fatal error: 'liteparser.h' file not found`.
 
 ## Dependencies
 
@@ -197,8 +201,15 @@ dist/
   sqldeep.cpp               Implementation (C++ internals, lexer, AST, parser, renderer, C bridge)
   sqldeep-agents-guide.md   Agent integration guide
 tests/                      doctest test files
+  sqldeep_xml.h/.c          SQLite runtime functions (xml_*, sqldeep_json_*)
+cmd/sqldeep.c               CLI: SQLite shell + sqldeep transpilation
+tests/                      doctest test files
 examples/                   demo.cpp
-vendor/                     Third-party dependencies
+testdata/                   sqlite.yaml — 79 integration cases shared by all bindings
+go/ swift/ kotlin/          Language bindings (each runs the shared testdata suite)
+docs/                       Papers, audits, convergence report
+STABILITY.md                Per-symbol stability catalogue
+vendor/                     Third-party dependencies (deepparser submodule, sqlite3, doctest)
 cvfile                      Build system (cv)
 ```
 

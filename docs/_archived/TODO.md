@@ -1,3 +1,6 @@
+> **Archived 2026-09-07.** All items below shipped. Followable work for this
+> repo now lives in `bullseye.yaml` (targets), not in a TODO file.
+
 # TODO
 
 ## Syntax enhancements
