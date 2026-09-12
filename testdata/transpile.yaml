@@ -202,6 +202,63 @@ convention:
     input: "CREATE VIEW v AS SELECT jsonml(<b>text</b>) FROM t"
     expected: "CREATE VIEW v AS SELECT xml_element_jsonml('b', 'text') FROM t"
 
+  # Walk nested sqldeep in statement kinds that are not CREATE VIEW (Fable F5 leftover).
+  - name: explain select object
+    input: "EXPLAIN SELECT { id, name } FROM t"
+    expected: "EXPLAIN SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
+    expected_postgres: "EXPLAIN SELECT jsonb_build_object('id', id, 'name', name) FROM t"
+
+  - name: explain query plan select object
+    input: "EXPLAIN QUERY PLAN SELECT { id } FROM t"
+    expected: "EXPLAIN QUERY PLAN SELECT sqldeep_json_object('id', id) FROM t"
+    expected_postgres: "EXPLAIN QUERY PLAN SELECT jsonb_build_object('id', id) FROM t"
+
+  - name: create trigger body select object
+    input: "CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT { id } FROM t; END"
+    expected: "CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT sqldeep_json_object('id', id) FROM t; END"
+
+  - name: create trigger when clause object
+    input: "CREATE TRIGGER tr AFTER INSERT ON t WHEN { ok } BEGIN SELECT 1; END"
+    expected: "CREATE TRIGGER tr AFTER INSERT ON t WHEN sqldeep_json_object('ok', ok) BEGIN SELECT 1; END"
+
+  - name: create index where in select object
+    input: "CREATE INDEX i ON t (x) WHERE x IN (SELECT { id } FROM t)"
+    expected: "CREATE INDEX i ON t (x) WHERE x IN (SELECT sqldeep_json_group_array(sqldeep_json_object('id', id)) FROM t)"
+
+  - name: create table column check object
+    input: "CREATE TABLE t1 (x TEXT CHECK (x = { a }))"
+    expected: "CREATE TABLE t1 (x TEXT CHECK (x = sqldeep_json_object('a', a)))"
+
+  - name: create table table-check object
+    input: "CREATE TABLE t1 (x TEXT, CHECK (x = { a }))"
+    expected: "CREATE TABLE t1 (x TEXT, CHECK (x = sqldeep_json_object('a', a)))"
+
+  - name: alter add column check object
+    input: "ALTER TABLE t ADD COLUMN x TEXT CHECK (x = { a })"
+    expected: "ALTER TABLE t ADD COLUMN x TEXT CHECK (x = sqldeep_json_object('a', a))"
+
+  # Join-path prefix must stay in FROM (Fable F9).
+  - name: join path comma prefix is kept
+    input: "SELECT { id } FROM customers c, c->orders o"
+    expected: "SELECT sqldeep_json_object('id', id) FROM customers c JOIN orders o ON o.customers_id = c.customers_id"
+    expected_postgres: "SELECT jsonb_build_object('id', id) FROM customers c JOIN orders o ON o.customers_id = c.customers_id"
+
+  - name: join path join prefix is kept
+    input: "SELECT { id: o.id } FROM customers c JOIN c->orders o"
+    expected: "SELECT sqldeep_json_object('id', o.id) FROM customers c JOIN orders o ON o.customers_id = c.customers_id"
+    expected_postgres: "SELECT jsonb_build_object('id', o.id) FROM customers c JOIN orders o ON o.customers_id = c.customers_id"
+
+  # Sibling SELECTs must not share a last-writer-wins alias map (Fable FO5).
+  - name: sibling join aliases stay local
+    input: "SELECT (SELECT { id } FROM customers c, c->orders o), (SELECT { id } FROM companies c, c->orders o2)"
+    expected: "SELECT (SELECT sqldeep_json_object('id', id) FROM customers c JOIN orders o ON o.customers_id = c.customers_id), (SELECT sqldeep_json_object('id', id) FROM companies c JOIN orders o2 ON o2.companies_id = c.companies_id)"
+    expected_postgres: "SELECT (SELECT jsonb_build_object('id', id) FROM customers c JOIN orders o ON o.customers_id = c.customers_id), (SELECT jsonb_build_object('id', id) FROM companies c JOIN orders o2 ON o2.companies_id = c.companies_id)"
+
+  - name: sibling subquery does not steal enclosing join alias
+    input: "SELECT (SELECT { id } FROM c->orders o), (SELECT 1 FROM companies c) FROM customers c"
+    expected: "SELECT (SELECT sqldeep_json_object('id', id) FROM orders o WHERE o.customers_id = c.customers_id), (SELECT 1 FROM companies c) FROM customers c"
+    expected_postgres: "SELECT (SELECT jsonb_build_object('id', id) FROM orders o WHERE o.customers_id = c.customers_id), (SELECT 1 FROM companies c) FROM customers c"
+
   - name: number with trailing dot not absorbed
     input: "SELECT 1.0 + 2 FROM t"
     expected: "SELECT 1.0 + 2 FROM t"

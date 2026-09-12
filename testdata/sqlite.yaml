@@ -1051,3 +1051,38 @@
   input: "SELECT <span title={v}>x</span> FROM t"
   expected:
     - '<span title="&quot;q&quot;">x</span>'
+
+# ── Join-path prefix (Fable F9) and sibling alias scope (Fable FO5) ─
+
+- name: "join-path prefix stays in FROM (comma form)"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER)"
+    - "INSERT INTO customers VALUES (1, 'alice')"
+    - "INSERT INTO orders VALUES (10, 1)"
+  input: "SELECT { id: o.orders_id, name: c.name } FROM customers c, c->orders o"
+  expected:
+    - '{"id":10,"name":"alice"}'
+
+- name: "join-path prefix stays in FROM (JOIN form)"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY, name TEXT)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER)"
+    - "INSERT INTO customers VALUES (1, 'alice')"
+    - "INSERT INTO orders VALUES (10, 1)"
+  input: "SELECT { id: o.orders_id, name: c.name } FROM customers c JOIN c->orders o"
+  expected:
+    - '{"id":10,"name":"alice"}'
+
+- name: "sibling join aliases stay local"
+  setup:
+    - "CREATE TABLE customers(customers_id INTEGER PRIMARY KEY)"
+    - "CREATE TABLE companies(companies_id INTEGER PRIMARY KEY)"
+    - "CREATE TABLE orders(orders_id INTEGER PRIMARY KEY, customers_id INTEGER, companies_id INTEGER)"
+    - "INSERT INTO customers VALUES (1)"
+    - "INSERT INTO companies VALUES (2)"
+    - "INSERT INTO orders VALUES (10, 1, NULL)"
+    - "INSERT INTO orders VALUES (20, NULL, 2)"
+  input: "SELECT { cust: (SELECT { id: o.orders_id } FROM customers c JOIN c->orders o), co: (SELECT { id: o2.orders_id } FROM companies c JOIN c->orders o2) }"
+  expected:
+    - '{"cust":[{"id":10}],"co":[{"id":20}]}'

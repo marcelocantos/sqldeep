@@ -327,12 +327,11 @@ public:
 
     // Mutate the AST in place. Returns the (possibly new) root node.
     LpNode *transform(LpNode *node) {
-        // One Transformer is reused across the statements of a script, so
-        // the alias map must start empty each time or a `c->orders` join
-        // in a later statement could resolve `c` to a table named only in
-        // an earlier one (Fable FO5, cross-statement leak).
-        alias_map_.clear();
-        build_alias_map(node);
+        // One Transformer is reused across the statements of a script.
+        // Alias scopes are pushed per SELECT during walk(); start empty
+        // so a later statement cannot see an earlier statement's alias
+        // (Fable FO5, cross-statement leak).
+        alias_scopes_.clear();
         return walk(node, /*depth=*/0, XmlMode::Xml);
     }
 
@@ -341,121 +340,77 @@ private:
     Backend       backend_;
     const FkIndex *fk_index_;
 
-    // alias → underlying table name, collected by a pre-pass over the
-    // entire AST so a sqldeep join path like `c->orders o` can resolve
-    // the leftmost name `c` (an alias from an enclosing FROM clause)
-    // to its real table when building the start-correlation.
-    std::map<std::string, std::string> alias_map_;
+    // Per-SELECT alias → table frames. Innermost frame is this SELECT's
+    // FROM; outer frames are enclosing SELECTs. Sibling SELECTs each
+    // get their own frame so `c` in one subquery cannot resolve a join
+    // in another (Fable FO5, last-writer-wins).
+    std::vector<std::map<std::string, std::string>> alias_scopes_;
 
-    // ── Alias-map prepass ─────────────────────────────────────────
+    struct AliasScope {
+        Transformer *t;
+        explicit AliasScope(Transformer *t) : t(t) {
+            t->alias_scopes_.emplace_back();
+        }
+        ~AliasScope() { t->alias_scopes_.pop_back(); }
+        AliasScope(const AliasScope&) = delete;
+        AliasScope& operator=(const AliasScope&) = delete;
+    };
 
-    void build_alias_map(LpNode *node) {
+    void bind_alias(const char *key, const char *table) {
+        if (!key || !table || alias_scopes_.empty()) return;
+        alias_scopes_.back()[key] = table;
+    }
+
+    // Bind this FROM item's own aliases only — do not walk into
+    // sub-SELECTs (those push their own frames when walked).
+    void bind_from(LpNode *node) {
         if (!node) return;
         switch (node->kind) {
             case LP_FROM_TABLE:
                 if (node->u.from_table.name) {
-                    /* Use alias if given, else map the table to itself
-                     * so unqualified table names also resolve. */
                     const char *key = node->u.from_table.alias
                                        ? node->u.from_table.alias
                                        : node->u.from_table.name;
-                    alias_map_[key] = node->u.from_table.name;
+                    bind_alias(key, node->u.from_table.name);
                 }
                 break;
+            case LP_JOIN_CLAUSE:
+                bind_from(node->u.join.left);
+                bind_from(node->u.join.right);
+                break;
+            case LP_FROM_SUBQUERY:
+                if (node->u.from_subquery.alias)
+                    bind_alias(node->u.from_subquery.alias,
+                               node->u.from_subquery.alias);
+                break;
             case LP_SQLDEEP_JOIN_PATH:
+                bind_from(node->u.sqldeep_join_path.prefix);
                 for (int i = 0; i < node->u.sqldeep_join_path.steps.count; i++) {
                     LpNode *s = node->u.sqldeep_join_path.steps.items[i];
                     if (!s) continue;
                     const auto& ss = s->u.sqldeep_join_step;
                     if (ss.table) {
                         const char *key = ss.alias ? ss.alias : ss.table;
-                        alias_map_[key] = ss.table;
+                        bind_alias(key, ss.table);
                     }
                 }
-                build_alias_map(node->u.sqldeep_join_path.prefix);
-                break;
-            default:
-                break;
-        }
-        // Recurse into all child slots that can contain FROM clauses
-        // or further sub-selects.
-        walk_for_aliases(node);
-    }
-
-    void walk_for_aliases(LpNode *node) {
-        switch (node->kind) {
-            case LP_STMT_SELECT:
-                build_alias_map(node->u.select.from);
-                for (int i = 0; i < node->u.select.result_columns.count; i++)
-                    build_alias_map(node->u.select.result_columns.items[i]);
-                for (int i = 0; i < node->u.select.group_by.count; i++)
-                    build_alias_map(node->u.select.group_by.items[i]);
-                build_alias_map(node->u.select.where);
-                build_alias_map(node->u.select.having);
-                for (int i = 0; i < node->u.select.order_by.count; i++)
-                    build_alias_map(node->u.select.order_by.items[i]);
-                build_alias_map(node->u.select.limit);
-                build_alias_map(node->u.select.with);
-                break;
-            case LP_COMPOUND_SELECT:
-                build_alias_map(node->u.compound.left);
-                build_alias_map(node->u.compound.right);
-                break;
-            case LP_RESULT_COLUMN:
-                build_alias_map(node->u.result_column.expr);
-                break;
-            case LP_JOIN_CLAUSE:
-                build_alias_map(node->u.join.left);
-                build_alias_map(node->u.join.right);
-                build_alias_map(node->u.join.on_expr);
-                break;
-            case LP_FROM_SUBQUERY:
-                build_alias_map(node->u.from_subquery.select);
-                break;
-            case LP_EXPR_SUBQUERY:
-                build_alias_map(node->u.subquery.select);
-                break;
-            case LP_EXPR_FUNCTION:
-                for (int i = 0; i < node->u.function.args.count; i++)
-                    build_alias_map(node->u.function.args.items[i]);
-                break;
-            case LP_EXPR_SQLDEEP_OBJECT:
-                for (int i = 0; i < node->u.sqldeep_object.fields.count; i++)
-                    build_alias_map(node->u.sqldeep_object.fields.items[i]);
-                break;
-            case LP_SQLDEEP_FIELD:
-                build_alias_map(node->u.sqldeep_field.value);
-                break;
-            case LP_EXPR_SQLDEEP_ARRAY:
-                for (int i = 0; i < node->u.sqldeep_array.elements.count; i++)
-                    build_alias_map(node->u.sqldeep_array.elements.items[i]);
-                break;
-            case LP_EXPR_SQLDEEP_XML:
-                for (int i = 0; i < node->u.sqldeep_xml.children.count; i++)
-                    build_alias_map(node->u.sqldeep_xml.children.items[i]);
-                for (int i = 0; i < node->u.sqldeep_xml.attrs.count; i++) {
-                    LpNode *a = node->u.sqldeep_xml.attrs.items[i];
-                    if (a) build_alias_map(a->u.sqldeep_xml_attr.value);
-                }
-                break;
-            case LP_WITH:
-                for (int i = 0; i < node->u.with.ctes.count; i++)
-                    build_alias_map(node->u.with.ctes.items[i]);
-                break;
-            case LP_CTE:
-                build_alias_map(node->u.cte.select);
-                break;
-            case LP_STMT_CREATE_VIEW:
-                build_alias_map(node->u.create_view.select);
                 break;
             default:
                 break;
         }
     }
 
-    const std::string& resolve_alias(const std::string& alias) {
-        auto it = alias_map_.find(alias);
-        return (it != alias_map_.end()) ? it->second : alias;
+    const std::string *lookup_alias(const std::string& alias) const {
+        for (auto it = alias_scopes_.rbegin(); it != alias_scopes_.rend(); ++it) {
+            auto f = it->find(alias);
+            if (f != it->end()) return &f->second;
+        }
+        return nullptr;
+    }
+
+    std::string resolve_alias(const std::string& alias) const {
+        const std::string *t = lookup_alias(alias);
+        return t ? *t : alias;
     }
 
     // Dialect function names ----------------------------------------
@@ -576,6 +531,16 @@ private:
             }
         }
 
+        // Bind this SELECT's FROM aliases before walking children so a
+        // nested `c->orders` sees the enclosing `customers c`, while a
+        // sibling SELECT that also names `c` cannot overwrite it.
+        if (node->kind == LP_STMT_SELECT) {
+            AliasScope scope(this);
+            bind_from(node->u.select.from);
+            walk_children(node, depth + 1, mode);
+            return rewrite_select(node);
+        }
+
         walk_children(node, depth + 1, mode);
 
         switch (node->kind) {
@@ -583,7 +548,6 @@ private:
             case LP_EXPR_SQLDEEP_ARRAY:     return rewrite_array(node);
             case LP_EXPR_SQLDEEP_JSON_PATH: return rewrite_json_path(node);
             case LP_EXPR_SQLDEEP_XML:       return rewrite_xml(node, mode);
-            case LP_STMT_SELECT:            return rewrite_select(node);
             default:                        return node;
         }
     }
@@ -694,6 +658,59 @@ private:
             case LP_STMT_CREATE_VIEW:
                 node->u.create_view.select =
                     walk(node->u.create_view.select, depth, mode);
+                break;
+            case LP_STMT_CREATE_TABLE:
+                walk_list(&node->u.create_table.columns, depth, mode);
+                walk_list(&node->u.create_table.constraints, depth, mode);
+                node->u.create_table.as_select =
+                    walk(node->u.create_table.as_select, depth, mode);
+                break;
+            case LP_COLUMN_DEF:
+                walk_list(&node->u.column_def.constraints, depth, mode);
+                break;
+            case LP_COLUMN_CONSTRAINT:
+                node->u.column_constraint.expr =
+                    walk(node->u.column_constraint.expr, depth, mode);
+                break;
+            case LP_TABLE_CONSTRAINT:
+                node->u.table_constraint.expr =
+                    walk(node->u.table_constraint.expr, depth, mode);
+                break;
+            case LP_STMT_EXPLAIN:
+                node->u.explain.stmt =
+                    walk(node->u.explain.stmt, depth, mode);
+                break;
+            case LP_STMT_CREATE_TRIGGER:
+                node->u.create_trigger.when =
+                    walk(node->u.create_trigger.when, depth, mode);
+                walk_list(&node->u.create_trigger.body, depth, mode);
+                break;
+            case LP_TRIGGER_CMD:
+                node->u.trigger_cmd.stmt =
+                    walk(node->u.trigger_cmd.stmt, depth, mode);
+                break;
+            case LP_STMT_CREATE_INDEX:
+                walk_list(&node->u.create_index.columns, depth, mode);
+                node->u.create_index.where =
+                    walk(node->u.create_index.where, depth, mode);
+                break;
+            case LP_INDEX_COLUMN:
+                node->u.index_column.expr =
+                    walk(node->u.index_column.expr, depth, mode);
+                break;
+            case LP_STMT_ALTER:
+                node->u.alter.column_def =
+                    walk(node->u.alter.column_def, depth, mode);
+                break;
+            case LP_SQLDEEP_JOIN_PATH:
+                node->u.sqldeep_join_path.prefix =
+                    walk(node->u.sqldeep_join_path.prefix, depth, mode);
+                walk_list(&node->u.sqldeep_join_path.steps, depth, mode);
+                break;
+            case LP_SQLDEEP_JOIN_STEP:
+                node->u.sqldeep_join_step.on_expr =
+                    walk(node->u.sqldeep_join_step.on_expr, depth, mode);
+                walk_list(&node->u.sqldeep_join_step.using_cols, depth, mode);
                 break;
             case LP_STMT_INSERT:
                 node->u.insert.source = walk(node->u.insert.source, depth, mode);
@@ -1338,11 +1355,11 @@ private:
         // scope (from an outer FROM clause or another step). Unknown
         // names are sqldeep errors — there's no implicit "anything
         // goes" auto-join base.
-        auto it = alias_map_.find(start_alias);
-        if (it == alias_map_.end()) {
+        const std::string *start = lookup_alias(start_alias);
+        if (!start) {
             throw Error("unknown join alias '" + start_alias + "'", 0, 0);
         }
-        std::string start_table = it->second;
+        std::string start_table = *start;
 
         // First step.
         LpNode *step1 = path.steps.items[0];
@@ -1377,6 +1394,26 @@ private:
 
             prev_ref   = s_ref;
             prev_table = s_table;
+        }
+
+        // The grammar stores preceding FROM/JOIN items in prefix
+        // (`FROM t1 a JOIN a->t2 b` / the comma form). `stl_prefix`
+        // is an incomplete JOIN_CLAUSE (right unset). Dropping it
+        // unbinds the start alias and turns a customer-level query
+        // into an orders scan (Fable F9). Fill the right side and
+        // put the start-correlation on ON so it is not also AND-ed
+        // into WHERE.
+        if (path.prefix) {
+            if (path.prefix->kind == LP_JOIN_CLAUSE
+                && !path.prefix->u.join.right) {
+                path.prefix->u.join.right = chain;
+                path.prefix->u.join.on_expr = *where_out;
+                *where_out = nullptr;
+                chain = path.prefix;
+            } else {
+                chain = make_join(arena_, path.prefix, chain, *where_out);
+                *where_out = nullptr;
+            }
         }
 
         return chain;
