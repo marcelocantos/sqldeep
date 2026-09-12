@@ -1086,3 +1086,27 @@
   input: "SELECT { cust: (SELECT { id: o.orders_id } FROM customers c JOIN c->orders o), co: (SELECT { id: o2.orders_id } FROM companies c JOIN c->orders o2) }"
   expected:
     - '{"cust":[{"id":10}],"co":[{"id":20}]}'
+
+# ── CREATE TABLE ... AS <select> ────────────────────────────────────
+
+- name: "create table as sqldeep select"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+    - "INSERT INTO t VALUES(2, 'bob')"
+  steps:
+    - transpile_exec: 'CREATE TABLE snap AS SELECT { id, name } AS doc FROM t ORDER BY id'
+    - transpile_query: 'SELECT doc FROM snap ORDER BY doc'
+  expected:
+    - '{"id":1,"name":"alice"}'
+    - '{"id":2,"name":"bob"}'
+
+- name: "create table as from-first sqldeep select"
+  setup:
+    - "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)"
+    - "INSERT INTO t VALUES(1, 'alice')"
+  steps:
+    - transpile_exec: 'CREATE TABLE snap AS FROM t SELECT { name } AS doc'
+    - transpile_query: 'SELECT doc FROM snap'
+  expected:
+    - '{"name":"alice"}'

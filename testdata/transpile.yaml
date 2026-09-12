@@ -237,6 +237,46 @@ convention:
     input: "ALTER TABLE t ADD COLUMN x TEXT CHECK (x = { a })"
     expected: "ALTER TABLE t ADD COLUMN x TEXT CHECK (x = sqldeep_json_object('a', a))"
 
+  # CREATE TABLE ... AS <select> — same transform surface as CREATE VIEW (Fable F5 / 98a9efa).
+  - name: create table as select with object
+    input: "CREATE TABLE t1 AS SELECT { id, name } FROM t"
+    expected: "CREATE TABLE t1 AS SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
+    expected_postgres: "CREATE TABLE t1 AS SELECT jsonb_build_object('id', id, 'name', name) FROM t"
+
+  - name: create table as from-first select
+    input: "CREATE TABLE t2 AS FROM t SELECT { name }"
+    expected: "CREATE TABLE t2 AS SELECT sqldeep_json_object('name', name) FROM t"
+    expected_postgres: "CREATE TABLE t2 AS SELECT jsonb_build_object('name', name) FROM t"
+
+  - name: create temp table as select with object
+    input: "CREATE TEMP TABLE t3 AS SELECT { id } FROM t"
+    expected: "CREATE TEMP TABLE t3 AS SELECT sqldeep_json_object('id', id) FROM t"
+    expected_postgres: "CREATE TEMP TABLE t3 AS SELECT jsonb_build_object('id', id) FROM t"
+
+  - name: create table as select with xml
+    input: "CREATE TABLE t4 AS SELECT <div>{name}</div> FROM t"
+    expected: "CREATE TABLE t4 AS SELECT xml_element('div', name) FROM t"
+
+  - name: insert from sqldeep select
+    input: "INSERT INTO dst SELECT { id, name } FROM t"
+    expected: "INSERT INTO dst SELECT sqldeep_json_object('id', id, 'name', name) FROM t"
+    expected_postgres: "INSERT INTO dst SELECT jsonb_build_object('id', id, 'name', name) FROM t"
+
+  # DEFAULT / GENERATED walk via column_constraint.expr (same slot as CHECK).
+  - name: create table column default object
+    input: "CREATE TABLE t1 (x TEXT DEFAULT ({ a }))"
+    expected: "CREATE TABLE t1 (x TEXT DEFAULT (sqldeep_json_object('a', a)))"
+
+  # deepparser's unparser emits the GENERATED ALWAYS keyword twice
+  # (grammar token + constraint printer). Pin the walk, not the printer.
+  - name: create table column generated object
+    input: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS AS ({ a }))"
+    expected: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS GENERATED ALWAYS AS (sqldeep_json_object('a', a)) VIRTUAL)"
+
+  - name: create table column generated stored object
+    input: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS AS ({ a }) STORED)"
+    expected: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS GENERATED ALWAYS AS (sqldeep_json_object('a', a)) STORED)"
+
   # Join-path prefix must stay in FROM (Fable F9).
   - name: join path comma prefix is kept
     input: "SELECT { id } FROM customers c, c->orders o"
@@ -258,6 +298,18 @@ convention:
     input: "SELECT (SELECT { id } FROM c->orders o), (SELECT 1 FROM companies c) FROM customers c"
     expected: "SELECT (SELECT sqldeep_json_object('id', id) FROM orders o WHERE o.customers_id = c.customers_id), (SELECT 1 FROM companies c) FROM customers c"
     expected_postgres: "SELECT (SELECT jsonb_build_object('id', id) FROM orders o WHERE o.customers_id = c.customers_id), (SELECT 1 FROM companies c) FROM customers c"
+
+  # Nested join-path: JOIN spelling (and a parenthesized comma form) work
+  # inside an object field. The bare comma form is a grammar limit — see errors.
+  - name: join path join prefix nested in object field
+    input: "SELECT { orders: SELECT { id } FROM customers c JOIN c->orders o }"
+    expected: "SELECT sqldeep_json_object('orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('id', id)) FROM customers c JOIN orders o ON o.customers_id = c.customers_id))"
+    expected_postgres: "SELECT jsonb_build_object('orders', (SELECT jsonb_agg(jsonb_build_object('id', id)) FROM customers c JOIN orders o ON o.customers_id = c.customers_id))"
+
+  - name: join path comma prefix nested in object field via parens
+    input: "SELECT { orders: (SELECT { id } FROM customers c, c->orders o) }"
+    expected: "SELECT sqldeep_json_object('orders', (SELECT sqldeep_json_group_array(sqldeep_json_object('id', id)) FROM customers c JOIN orders o ON o.customers_id = c.customers_id))"
+    expected_postgres: "SELECT jsonb_build_object('orders', (SELECT jsonb_agg(jsonb_build_object('id', id)) FROM customers c JOIN orders o ON o.customers_id = c.customers_id))"
 
   - name: number with trailing dot not absorbed
     input: "SELECT 1.0 + 2 FROM t"
@@ -1215,6 +1267,14 @@ errors:
 
   - name: bare expression with trailing WHERE is a parse error
     input: "x WHERE 1"
+
+  # Grammar limit: a comma at brace-frame depth 0 is FIELD_COMMA (field
+  # separator), so `FROM t1 a, a->t2` inside a `{…}` field value cannot
+  # parse. Use JOIN, or wrap the inner SELECT in parens (see convention
+  # goldens "join path join prefix nested in object field" and
+  # "join path comma prefix nested in object field via parens").
+  - name: comma join-path nested in object field is a grammar limit
+    input: "SELECT { orders: SELECT { id } FROM customers c, c->orders o }"
 
 fk_errors:
   - name: fk missing error
