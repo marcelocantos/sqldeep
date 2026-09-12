@@ -267,15 +267,14 @@ convention:
     input: "CREATE TABLE t1 (x TEXT DEFAULT ({ a }))"
     expected: "CREATE TABLE t1 (x TEXT DEFAULT (sqldeep_json_object('a', a)))"
 
-  # deepparser's unparser emits the GENERATED ALWAYS keyword twice
-  # (grammar token + constraint printer). Pin the walk, not the printer.
+  # Printer must emit GENERATED ALWAYS once (type-token fallback + constraint).
   - name: create table column generated object
     input: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS AS ({ a }))"
-    expected: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS GENERATED ALWAYS AS (sqldeep_json_object('a', a)) VIRTUAL)"
+    expected: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS AS (sqldeep_json_object('a', a)) VIRTUAL)"
 
   - name: create table column generated stored object
     input: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS AS ({ a }) STORED)"
-    expected: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS GENERATED ALWAYS AS (sqldeep_json_object('a', a)) STORED)"
+    expected: "CREATE TABLE t1 (a INT, b TEXT GENERATED ALWAYS AS (sqldeep_json_object('a', a)) STORED)"
 
   # Join-path prefix must stay in FROM (Fable F9).
   - name: join path comma prefix is kept
