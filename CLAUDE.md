@@ -246,6 +246,15 @@ focused component testing.
   design. Promotion is a one-way door.
 - Stable items are never affected by the addition of Experimental features.
 
+## Homebrew
+
+The formula in `marcelocantos/homebrew-tap` is published by
+[tapper](https://github.com/marcelocantos/tapper) from the dev Mac, not by CI.
+After a release's assets have uploaded (`.github/workflows/release.yml`), run
+`cv release-tap` (latest tag) or `./scripts/release-tap.sh vX.Y.Z` (or `tapper push --version vX.Y.Z`). Config lives in `tapper.yaml`;
+the tap token is read from the macOS keychain, so no Actions secret is needed.
+Docker must be running.
+
 ## Delivery
 
 Merged to master.
