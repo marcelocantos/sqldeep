@@ -86,3 +86,8 @@ build/examples/{name}.o: examples/{name}.cpp
 
 build/cmd/{name}.o: cmd/{name}.c
     $cc -w $incflags -I$vendor/src -DHAVE_READLINE=1 $rl_incflags -c $input -o $target
+
+# Publish the formula to the Homebrew tap for an existing release. Run after
+# the release assets exist — tapper reads them to build the formula.
+!release-tap:
+    ./scripts/release-tap.sh
